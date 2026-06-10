@@ -1,4 +1,16 @@
 import streamlit as st
+import os
+
+# --- CRITICAL BLANKET DATA PROVISIONING ---
+# Forces the Streamlit server container to fetch and unpack the astronomy catalogs 
+# instantly upon cold boot, preventing database connection timeouts.
+if "STARPLOT_SETUP_COMPLETE" not in st.session_state:
+    with st.spinner("📦 Initializing local astronomical catalogs & fonts..."):
+        # Executes Starplot's command-line automation wizard to safely populate data folders
+        os.system("starplot setup")
+        st.session_state["STARPLOT_SETUP_COMPLETE"] = True
+
+# Standard imports continue smoothly now that data is present locally
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 import matplotlib
@@ -66,7 +78,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             styles.extensions.BLUE_NIGHT
         )
         
-        # Pass explicit tuples into 'azimuth' and 'altitude' parameters
+        # Create HorizonPlot using explicit coordinates tuples
         p = HorizonPlot(
             observer=observer,
             azimuth=(az_min, az_max),
@@ -75,8 +87,8 @@ if st.button("Generate Sky Graphic", type="primary"):
             resolution=1600,             # Sharp pixel resolution for 16:9 sizing
         )
         
-        # CRITICAL FIX: Restrict calculations to stars brighter than magnitude 3.0 
-        # to prevent backend processing timeouts on the Streamlit server.
+        # Restrict calculations to stars brighter than magnitude 3.0 
+        # to guarantee execution speeds fit comfortably under Streamlit server thresholds.
         p.stars(where=[_.magnitude < 3.0], style__label__font_color="#ffffff", style__label__font_size=11)
         p.planets(style__label__font_color="#ffffff", style__label__font_size=13)
         p.moon(style__label__font_color="#ffffff", style__label__font_size=13)
