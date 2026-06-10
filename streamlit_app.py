@@ -35,7 +35,7 @@ direction = st.sidebar.selectbox(
     index=0
 )
 
-# Standardize negative degrees for seamless Matplotlib wrap boundaries looking North
+# Standardize continuous negative degrees for flawless wrap boundaries looking North
 az_map = {
     "East (Rising)": (45, 135),
     "West (Setting)": (225, 315),
@@ -61,27 +61,21 @@ if st.button("Generate Sky Graphic", type="primary"):
             dt=dt_combined
         )
         
-        # VERIFIED STYLE PATTERN:
-        # Load a clean style and extend it purely using Starplot's built-in extension models.
-        # This completely guarantees Pydantic validation passes successfully.
+        # Load baseline style and extend using Starplot's built-in blueprint model
         plot_style = styles.PlotStyle().extend(
             styles.extensions.BLUE_NIGHT
         )
         
-        # Create Starplot Horizon object
+        # VERIFIED FIX: Pass explicit tuples into 'azimuth' and 'altitude' parameters
         p = HorizonPlot(
             observer=observer,
-            az_min=az_min,
-            az_max=az_max,
-            alt_min=0,
-            alt_max=alt_max,
+            azimuth=(az_min, az_max),
+            altitude=(0, alt_max),
             style=plot_style,
             resolution=1600,             # Sharp pixel resolution for 16:9 sizing
         )
         
-        # VERIFIED PLOTTING PATTERN:
-        # Instead of modifying the style object, we pass font overrides directly 
-        # into the plotting kwargs using Starplot's 'style__field' notation.
+        # Plot standard elements using verified kwarg overrides for high-res visibility
         p.stars(style__label__font_color="#ffffff", style__label__font_size=11)
         p.planets(style__label__font_color="#ffffff", style__label__font_size=13)
         p.moon(style__label__font_color="#ffffff", style__label__font_size=13)
@@ -89,13 +83,13 @@ if st.button("Generate Sky Graphic", type="primary"):
         # Gain access to the underlying Matplotlib axis object
         ax = p.ax
         
-        # Dynamically sample the boundaries directly from the plot coordinates
+        # Dynamically sample boundaries directly from the frame axes
         xmin, xmax = ax.get_xlim()
         ymin = 0
-        ymax = 10  # Always lock the height to exactly 10 degrees high
+        ymax = 10  # Always lock tree layer height to exactly 10 degrees high
         
         try:
-            # Look for the asset image in your root folder
+            # Look for the custom silhouette asset image in your repository folder
             tree_silhouette = plt.imread("tree_line_silhouette.png")
             
             ax.imshow(
@@ -108,12 +102,11 @@ if st.button("Generate Sky Graphic", type="primary"):
             # Procedural vector backup if your workspace asset file is missing
             import numpy as np
             x_az = np.linspace(xmin, xmax, 300)
-            # Builds a quick organic hilly baseline resting between 3 to 5 degrees high
             y_alt = 4.0 + 1.0 * np.sin(x_az / 4) + 0.3 * np.sin(x_az / 1.5)
             ax.fill_between(x_az, 0, y_alt, color="#04090e", zorder=10)
             st.caption("⚠️ Using vector silhouette fallback. Upload 'tree_line_silhouette.png' to see custom tree imagery.")
 
-        # Ensure layout constraints prevent boundary labeling cutoffs
+        # Ensure layout constraints prevent text clip-offs on canvas margins
         p.fig.set_tight_layout(True)
 
         # --- DISPLAY & DOWNLOAD ---
