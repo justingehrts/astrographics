@@ -36,7 +36,7 @@ direction = st.sidebar.selectbox(
     index=0
 )
 
-# Standardize continuous negative degrees for flawless wrap boundaries looking North
+# Standardize continuous coordinates so Matplotlib maps linear spans without clipping
 az_map = {
     "East (Rising)": (45, 135),
     "West (Setting)": (225, 315),
@@ -92,52 +92,41 @@ if st.button("Generate Sky Graphic", type="primary"):
         )
         
         # Plot celestial objects
-        # Only show stars if it's actually dark enough to see them (Sun below -6 degrees)
+        # Only show background stars if it's actually dark enough to see them (Sun below -6 degrees)
         if sun_alt <= -6:
             p.stars(where=[_.magnitude < 2.5], style__label__font_color="#ffffff", style__label__font_size=11)
             
         p.planets(style__label__font_color="#ffffff", style__label__font_size=13)
         p.moon(style__label__font_color="#ffffff", style__label__font_size=13)
         
-        # 3. NATIVE HORIZON POLYGON ENGINE
-        # Generate coordinate arrays across the target azimuth span
-        # We step slightly wider than the boundaries to prevent raw edge gaps
-        x_az = np.linspace(az_min - 5, az_max + 5, 250)
+        # 3. DIRECT MATPLOTLIB HORIZON & TREELINE OVERLAY ENGINE
+        ax = p.ax
         
-        # Build out a dense tree canopy pattern using sine curves
-        base_hills = 4.0 + 1.2 * np.sin(x_az / 6)
-        tree_jaggedness = 1.8 * np.sin(x_az * 1.5) * np.cos(x_az * 0.4)
-        fine_branches = 0.8 * np.sin(x_az * 10.0)
+        # Grab the exact operational frame boundaries directly from the canvas projection
+        xmin, xmax = ax.get_xlim()
         
-        y_alt = base_hills + tree_jaggedness + fine_branches
-        y_alt = np.clip(y_alt, 2.0, 10.0)  # Caps tree tips to exactly 10 degrees high max
+        # Generate our rolling jagged tree coordinates
+        x_space = np.linspace(xmin, xmax, 400)
+        base_ground = 4.0 + 1.0 * np.sin(x_space / 5)
+        tree_canopy = 1.5 * np.sin(x_space * 2.0) * np.cos(x_space * 0.5)
+        fine_foliage = 0.6 * np.sin(x_space * 12.0)
         
-        # Connect the coordinate arrays into a complete polygon loop.
-        # It sweeps left-to-right along the tree line, drops down into negative altitude space 
-        # below the true horizon (to create the solid ground block), and zips back to the start.
-        poly_coords = []
+        y_treeline = base_ground + tree_canopy + fine_foliage
+        y_treeline = np.clip(y_treeline, 2.0, 10.0)  # Dynamic cap at exactly 10 degrees high
         
-        # Top boundary (Tree line canopy)
-        for az, alt in zip(x_az, y_alt):
-            poly_coords.append((az, alt))
-            
-        # Drop down below the true horizon to create the solid ground element
-        poly_coords.append((x_az[-1], -20.0))  # Right-hand bottom corner
-        poly_coords.append((x_az[0], -20.0))   # Left-hand bottom corner
-        
-        # Render the terrain polygon directly via Starplot's native mapping system
-        p.polygon(
-            points=poly_coords,
-            style={
-                "fill_color": "#060c14",    # Deep silhouette ground/tree color
-                "edge_color": "#060c14",
-                "alpha": 1.0,
-                "zorder": 99               # Forces ground to layer over gridlines and rising planets
-            }
+        # Using ax.fill_between layers a solid, opaque block of ground and trees 
+        # directly over the base gridlines so it cannot be buried by Starplot themes.
+        ax.fill_between(
+            x_space,
+            -10,             # Extends far below the true horizon line to form the earth block
+            y_treeline,      # Caps right at the top of the tree silhouette line
+            color="#060c14", # Deep silhouette ground/tree color
+            zorder=100,      # High layer rank forces it over grid backgrounds and low planets
+            clip_on=False
         )
         
-        # Clean up gridline visibility to match our dynamic sky background colors
-        p.ax.grid(True, color=grid_color, alpha=0.4)
+        # Dynamic axis grid coloring to match your chosen time of day sky color
+        ax.grid(True, color=grid_color, alpha=0.3)
 
         # Force tight layout formatting
         p.fig.set_tight_layout(True)
