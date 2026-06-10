@@ -99,30 +99,45 @@ if st.button("Generate Sky Graphic", type="primary"):
         p.planets(style__label__font_color="#ffffff", style__label__font_size=13)
         p.moon(style__label__font_color="#ffffff", style__label__font_size=13)
         
-        # 3. VERIFIED VECTOR SILHOUETTE ENGINE
-        # This executes at the very end of the loop, forcing the trees onto the top canvas layer.
-        ax = p.ax
-        xmin, xmax = ax.get_xlim()
+        # 3. NATIVE HORIZON POLYGON ENGINE
+        # Generate coordinate arrays across the target azimuth span
+        # We step slightly wider than the boundaries to prevent raw edge gaps
+        x_az = np.linspace(az_min - 5, az_max + 5, 250)
         
-        # Build a dense rolling tree canvas
-        x_az = np.linspace(xmin, xmax, 500)
+        # Build out a dense tree canopy pattern using sine curves
         base_hills = 4.0 + 1.2 * np.sin(x_az / 6)
         tree_jaggedness = 1.8 * np.sin(x_az * 1.5) * np.cos(x_az * 0.4)
         fine_branches = 0.8 * np.sin(x_az * 10.0)
         
         y_alt = base_hills + tree_jaggedness + fine_branches
-        y_alt = np.clip(y_alt, 2.0, 10.0)  # Consistently clamp to exactly 10 degrees high max
+        y_alt = np.clip(y_alt, 2.0, 10.0)  # Caps tree tips to exactly 10 degrees high max
         
-        # Draw the opaque vector line directly over the finished plot space
-        ax.fill_between(
-            x_az, 0, y_alt, 
-            color="#050b14", 
-            zorder=100,            # High z-order guarantees it sits on top of Starplot layers
-            clip_on=False          # Bypasses axis coordinate boundaries
+        # Connect the coordinate arrays into a complete polygon loop.
+        # It sweeps left-to-right along the tree line, drops down into negative altitude space 
+        # below the true horizon (to create the solid ground block), and zips back to the start.
+        poly_coords = []
+        
+        # Top boundary (Tree line canopy)
+        for az, alt in zip(x_az, y_alt):
+            poly_coords.append((az, alt))
+            
+        # Drop down below the true horizon to create the solid ground element
+        poly_coords.append((x_az[-1], -20.0))  # Right-hand bottom corner
+        poly_coords.append((x_az[0], -20.0))   # Left-hand bottom corner
+        
+        # Render the terrain polygon directly via Starplot's native mapping system
+        p.polygon(
+            points=poly_coords,
+            style={
+                "fill_color": "#060c14",    # Deep silhouette ground/tree color
+                "edge_color": "#060c14",
+                "alpha": 1.0,
+                "zorder": 99               # Forces ground to layer over gridlines and rising planets
+            }
         )
         
         # Clean up gridline visibility to match our dynamic sky background colors
-        ax.grid(True, color=grid_color, alpha=0.4)
+        p.ax.grid(True, color=grid_color, alpha=0.4)
 
         # Force tight layout formatting
         p.fig.set_tight_layout(True)
