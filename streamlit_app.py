@@ -35,7 +35,7 @@ direction = st.sidebar.selectbox(
     index=0
 )
 
-# FIXED: Standardizes negative degrees for seamless Matplotlib wrap boundaries looking North
+# Standardize negative degrees for seamless Matplotlib wrap boundaries looking North
 az_map = {
     "East (Rising)": (45, 135),
     "West (Setting)": (225, 315),
@@ -61,14 +61,22 @@ if st.button("Generate Sky Graphic", type="primary"):
             dt=dt_combined
         )
         
-        # FIXED: Initialize base style and properly attach a built-in Starplot extension map 
+        # VERIFIED FIX: Instantiate the base style and safely mutate properties 
+        # using dictionary extensions to fully satisfy Pydantic schemas.
         plot_style = styles.PlotStyle().extend(
-            styles.extensions.BLUE_NIGHT
+            styles.extensions.BLUE_NIGHT,
+            {
+                "star": {
+                    "label": {"font_size": 11, "font_color": "#ffffff"}
+                },
+                "planet": {
+                    "label": {"font_size": 13, "font_color": "#ffffff"}
+                },
+                "moon": {
+                    "label": {"font_size": 13, "font_color": "#ffffff"}
+                }
+            }
         )
-        
-        # Safely tweak custom color variables using standard hex strings
-        plot_style.background_color = "#0c1821"  # Deep sky background
-        plot_style.text_color = "#ffffff"        # Clean white labels
         
         # Create Starplot Horizon object
         p = HorizonPlot(
@@ -113,7 +121,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             ax.fill_between(x_az, 0, y_alt, color="#04090e", zorder=10)
             st.caption("⚠️ Using vector silhouette fallback. Upload 'tree_line_silhouette.png' to see custom tree imagery.")
 
-        # FIXED: Ensure layout constraints prevent boundary labeling cutoffs
+        # Ensure layout constraints prevent boundary labeling cutoffs
         p.fig.set_tight_layout(True)
 
         # --- DISPLAY & DOWNLOAD ---
