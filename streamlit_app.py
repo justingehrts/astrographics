@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 import matplotlib
 matplotlib.use("Agg")  # Safe headless execution for cloud servers
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
 import io
 import numpy as np
 
@@ -92,41 +93,47 @@ if st.button("Generate Sky Graphic", type="primary"):
         )
         
         # Plot celestial objects
-        # Only show background stars if it's actually dark enough to see them (Sun below -6 degrees)
         if sun_alt <= -6:
             p.stars(where=[_.magnitude < 2.5], style__label__font_color="#ffffff", style__label__font_size=11)
             
         p.planets(style__label__font_color="#ffffff", style__label__font_size=13)
         p.moon(style__label__font_color="#ffffff", style__label__font_size=13)
         
-        # 3. DIRECT MATPLOTLIB HORIZON & TREELINE OVERLAY ENGINE
+        # 3. VERIFIED GEOMETRIC SILHOUETTE OVERLAY
         ax = p.ax
         
-        # Grab the exact operational frame boundaries directly from the canvas projection
-        xmin, xmax = ax.get_xlim()
+        # Step slightly beyond the boundaries to prevent raw edge alignment gaps
+        x_space = np.linspace(az_min - 2, az_max + 2, 200)
         
-        # Generate our rolling jagged tree coordinates
-        x_space = np.linspace(xmin, xmax, 400)
+        # Mathematical formula mimicking local Ohio forest canopies
         base_ground = 4.0 + 1.0 * np.sin(x_space / 5)
-        tree_canopy = 1.5 * np.sin(x_space * 2.0) * np.cos(x_space * 0.5)
-        fine_foliage = 0.6 * np.sin(x_space * 12.0)
+        tree_canopy = 1.2 * np.sin(x_space * 2.0) * np.cos(x_space * 0.5)
+        fine_foliage = 0.5 * np.sin(x_space * 10.0)
         
         y_treeline = base_ground + tree_canopy + fine_foliage
-        y_treeline = np.clip(y_treeline, 2.0, 10.0)  # Dynamic cap at exactly 10 degrees high
+        y_treeline = np.clip(y_treeline, 1.5, 10.0)  # Dynamic cap at exactly 10 degrees high max
         
-        # Using ax.fill_between layers a solid, opaque block of ground and trees 
-        # directly over the base gridlines so it cannot be buried by Starplot themes.
-        ax.fill_between(
-            x_space,
-            -10,             # Extends far below the true horizon line to form the earth block
-            y_treeline,      # Caps right at the top of the tree silhouette line
-            color="#060c14", # Deep silhouette ground/tree color
-            zorder=100,      # High layer rank forces it over grid backgrounds and low planets
-            clip_on=False
+        # Build a true closed polygon loop path.
+        # It sweeps left-to-right along the tree tips, then locks precisely to the bottom corners
+        poly_points = []
+        for az, alt in zip(x_space, y_treeline):
+            poly_points.append((az, alt))
+            
+        # Lock exactly to the visible bottom corners at altitude = 0
+        poly_points.append((x_space[-1], 0.0))  # Bottom Right Corner
+        poly_points.append((x_space[0], 0.0))   # Bottom Left Corner
+        
+        # Create the standard Matplotlib Patch and pin it safely onto the top canvas layer
+        terrain_patch = Polygon(
+            poly_points, 
+            facecolor="#060c14", 
+            edgecolor="#060c14", 
+            zorder=100,      # High z-order guarantees it layers over starplot background textures
         )
+        ax.add_patch(terrain_patch)
         
-        # Dynamic axis grid coloring to match your chosen time of day sky color
-        ax.grid(True, color=grid_color, alpha=0.3)
+        # Retain explicit grid rendering color guidelines
+        ax.grid(True, color=grid_color, alpha=0.3, zorder=1)
 
         # Force tight layout formatting
         p.fig.set_tight_layout(True)
