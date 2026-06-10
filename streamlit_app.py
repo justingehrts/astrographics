@@ -1,6 +1,8 @@
 import streamlit as st
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
+import matplotlib
+matplotlib.use("Agg")  # Force non-interactive backend for headless cloud servers
 import matplotlib.pyplot as plt
 import io
 
@@ -27,19 +29,18 @@ lat = st.sidebar.number_input("Latitude", value=40.00, step=0.01, format="%.2f")
 lon = st.sidebar.number_input("Longitude", value=-83.10, step=0.01, format="%.2f")
 
 st.sidebar.header("2. View Window")
-# Common direction presets
 direction = st.sidebar.selectbox(
     "Looking Direction", 
     ["East (Rising)", "West (Setting)", "South", "North"], 
     index=0
 )
 
-# Map direction string to exact azimuth degrees
+# FIXED: Reconfigured to avoid 360-degree boundary clipping issues in Matplotlib axes
 az_map = {
     "East (Rising)": (45, 135),
     "West (Setting)": (225, 315),
     "South": (135, 225),
-    "North": (315, 45)  
+    "North": (-45, 45)  # Using negative degrees handles the North wrap flawlessly 
 }
 az_min, az_max = az_map[direction]
 
@@ -60,12 +61,12 @@ if st.button("Generate Sky Graphic", type="primary"):
             dt=dt_combined
         )
         
-        # Define clean, presentation-ready styling using Starplot's color helpers
-        plot_style = styles.PlotStyle(
-            background_color=styles.HexColor("#0c1821"),  
-            text_color=styles.HexColor("#ffffff"),        
-            font_family="sans-serif",                      
-        )
+        # FIXED: Use a complete built-in style extension preset to satisfy Pydantic validations
+        plot_style = styles.PlotStyle.load_from_preset("extension")
+        
+        # Safely tweak custom color variables using standard hex strings
+        plot_style.background_color = "#0c1821"  # Deep sky background
+        plot_style.text_color = "#ffffff"        # Clean white labels
         
         # Create Starplot Horizon object
         p = HorizonPlot(
@@ -109,6 +110,9 @@ if st.button("Generate Sky Graphic", type="primary"):
             y_alt = 4.0 + 1.0 * np.sin(x_az / 4) + 0.3 * np.sin(x_az / 1.5)
             ax.fill_between(x_az, 0, y_alt, color="#04090e", zorder=10)
             st.caption("⚠️ Using vector silhouette fallback. Upload 'tree_line_silhouette.png' to see custom tree imagery.")
+
+        # FIXED: Ensure the layout bounding boxes don't truncate text tags near borders
+        p.fig.set_tight_layout(True)
 
         # --- DISPLAY & DOWNLOAD ---
         # Render the matplotlib plot cleanly right on the web application page
