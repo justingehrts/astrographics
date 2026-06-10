@@ -60,11 +60,11 @@ if st.button("Generate Sky Graphic", type="primary"):
             dt=dt_combined
         )
         
-        # Define clean, presentation-ready styling
+        # Define clean, presentation-ready styling using Starplot's color helpers
         plot_style = styles.PlotStyle(
-            background_color="#0c1821",  # Deep nighttime sky
-            text_color="#ffffff",
-            font_name="sans-serif",      # Crisp fallback font
+            background_color=styles.HexColor("#0c1821"),  
+            text_color=styles.HexColor("#ffffff"),        
+            font_family="sans-serif",                      
         )
         
         # Create Starplot Horizon object
