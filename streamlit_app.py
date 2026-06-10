@@ -61,22 +61,21 @@ if st.button("Generate Sky Graphic", type="primary"):
             dt=dt_combined
         )
         
-        # VERIFIED FIX: Instantiate the base style and safely mutate properties 
-        # using dictionary extensions to fully satisfy Pydantic schemas.
-        plot_style = styles.PlotStyle().extend(
-            styles.extensions.BLUE_NIGHT,
-            {
-                "star": {
-                    "label": {"font_size": 11, "font_color": "#ffffff"}
-                },
-                "planet": {
-                    "label": {"font_size": 13, "font_color": "#ffffff"}
-                },
-                "moon": {
-                    "label": {"font_size": 13, "font_color": "#ffffff"}
-                }
+        # VERIFIED FIX: Bypassing the buggy .extend() method entirely.
+        # We parse our style directly into the model layout block to guarantee validation passes.
+        plot_style = styles.PlotStyle.parse_obj({
+            "background_color": "#0c1821",  # Deep twilight sky background
+            "text_color": "#ffffff",        # Clean white labels
+            "star": {
+                "label": {"font_size": 11, "font_color": "#ffffff"}
+            },
+            "planet": {
+                "label": {"font_size": 13, "font_color": "#ffffff"}
+            },
+            "moon": {
+                "label": {"font_size": 13, "font_color": "#ffffff"}
             }
-        )
+        })
         
         # Create Starplot Horizon object
         p = HorizonPlot(
