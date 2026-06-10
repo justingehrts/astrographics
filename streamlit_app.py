@@ -109,4 +109,25 @@ if st.button("Generate Sky Graphic", type="primary"):
             import numpy as np
             x_az = np.linspace(xmin, xmax, 300)
             # Builds a quick organic hilly baseline resting between 3 to 5 degrees high
-            y_alt = 4.0 + 1.0 * np.sin(x_az / 4) +
+            y_alt = 4.0 + 1.0 * np.sin(x_az / 4) + 0.3 * np.sin(x_az / 1.5)
+            ax.fill_between(x_az, 0, y_alt, color="#04090e", zorder=10)
+            st.caption("⚠️ Using vector silhouette fallback. Upload 'tree_line_silhouette.png' to see custom tree imagery.")
+
+        # Ensure layout constraints prevent boundary labeling cutoffs
+        p.fig.set_tight_layout(True)
+
+        # --- DISPLAY & DOWNLOAD ---
+        # Render the matplotlib plot cleanly right on the web application page
+        st.pyplot(p.fig)
+        
+        # Convert figure to an in-memory byte stream for high-res downloading
+        img_buf = io.BytesIO()
+        p.fig.savefig(img_buf, format="png", bbox_inches='tight', dpi=150)
+        img_buf.seek(0)
+        
+        st.download_button(
+            label="💾 Download High-Res PNG for On-Air / Social",
+            data=img_buf,
+            file_name=f"sky_graphic_{obs_date}_{direction.split()[0]}.png",
+            mime="image/png"
+        )
