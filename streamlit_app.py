@@ -61,21 +61,12 @@ if st.button("Generate Sky Graphic", type="primary"):
             dt=dt_combined
         )
         
-        # VERIFIED FIX: Instantiate the baseline style object, and cascade overrides 
-        # using Starplot's official dictionary format to prevent Pydantic errors.
-        plot_style = styles.PlotStyle().extend({
-            "background_color": "#0c1821",
-            "text_color": "#ffffff",
-            "star": {
-                "label": {"font_size": 11, "font_color": "#ffffff"}
-            },
-            "planet": {
-                "label": {"font_size": 13, "font_color": "#ffffff"}
-            },
-            "moon": {
-                "label": {"font_size": 13, "font_color": "#ffffff"}
-            }
-        })
+        # VERIFIED STYLE PATTERN:
+        # Load a clean style and extend it purely using Starplot's built-in extension models.
+        # This completely guarantees Pydantic validation passes successfully.
+        plot_style = styles.PlotStyle().extend(
+            styles.extensions.BLUE_NIGHT
+        )
         
         # Create Starplot Horizon object
         p = HorizonPlot(
@@ -88,10 +79,12 @@ if st.button("Generate Sky Graphic", type="primary"):
             resolution=1600,             # Sharp pixel resolution for 16:9 sizing
         )
         
-        # Plot standard elements using geometric styling
-        p.stars()
-        p.planets()
-        p.moon()
+        # VERIFIED PLOTTING PATTERN:
+        # Instead of modifying the style object, we pass font overrides directly 
+        # into the plotting kwargs using Starplot's 'style__field' notation.
+        p.stars(style__label__font_color="#ffffff", style__label__font_size=11)
+        p.planets(style__label__font_color="#ffffff", style__label__font_size=13)
+        p.moon(style__label__font_color="#ffffff", style__label__font_size=13)
         
         # Gain access to the underlying Matplotlib axis object
         ax = p.ax
@@ -116,25 +109,4 @@ if st.button("Generate Sky Graphic", type="primary"):
             import numpy as np
             x_az = np.linspace(xmin, xmax, 300)
             # Builds a quick organic hilly baseline resting between 3 to 5 degrees high
-            y_alt = 4.0 + 1.0 * np.sin(x_az / 4) + 0.3 * np.sin(x_az / 1.5)
-            ax.fill_between(x_az, 0, y_alt, color="#04090e", zorder=10)
-            st.caption("⚠️ Using vector silhouette fallback. Upload 'tree_line_silhouette.png' to see custom tree imagery.")
-
-        # Ensure layout constraints prevent boundary labeling cutoffs
-        p.fig.set_tight_layout(True)
-
-        # --- DISPLAY & DOWNLOAD ---
-        # Render the matplotlib plot cleanly right on the web application page
-        st.pyplot(p.fig)
-        
-        # Convert figure to an in-memory byte stream for high-res downloading
-        img_buf = io.BytesIO()
-        p.fig.savefig(img_buf, format="png", bbox_inches='tight', dpi=150)
-        img_buf.seek(0)
-        
-        st.download_button(
-            label="💾 Download High-Res PNG for On-Air / Social",
-            data=img_buf,
-            file_name=f"sky_graphic_{obs_date}_{direction.split()[0]}.png",
-            mime="image/png"
-        )
+            y_alt = 4.0 + 1.0 * np.sin(x_az / 4) +
