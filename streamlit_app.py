@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 import matplotlib
-matplotlib.use("Agg")  # Force non-interactive backend for headless cloud servers
+matplotlib.use("Agg")  # Safe headless execution for cloud servers
 import matplotlib.pyplot as plt
 import io
 
@@ -35,12 +35,12 @@ direction = st.sidebar.selectbox(
     index=0
 )
 
-# FIXED: Reconfigured to avoid 360-degree boundary clipping issues in Matplotlib axes
+# FIXED: Standardizes negative degrees for seamless Matplotlib wrap boundaries looking North
 az_map = {
     "East (Rising)": (45, 135),
     "West (Setting)": (225, 315),
     "South": (135, 225),
-    "North": (-45, 45)  # Using negative degrees handles the North wrap flawlessly 
+    "North": (-45, 45)  
 }
 az_min, az_max = az_map[direction]
 
@@ -61,8 +61,10 @@ if st.button("Generate Sky Graphic", type="primary"):
             dt=dt_combined
         )
         
-        # FIXED: Use a complete built-in style extension preset to satisfy Pydantic validations
-        plot_style = styles.PlotStyle.load_from_preset("extension")
+        # FIXED: Initialize base style and properly attach a built-in Starplot extension map 
+        plot_style = styles.PlotStyle().extend(
+            styles.extensions.BLUE_NIGHT
+        )
         
         # Safely tweak custom color variables using standard hex strings
         plot_style.background_color = "#0c1821"  # Deep sky background
@@ -111,7 +113,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             ax.fill_between(x_az, 0, y_alt, color="#04090e", zorder=10)
             st.caption("⚠️ Using vector silhouette fallback. Upload 'tree_line_silhouette.png' to see custom tree imagery.")
 
-        # FIXED: Ensure the layout bounding boxes don't truncate text tags near borders
+        # FIXED: Ensure layout constraints prevent boundary labeling cutoffs
         p.fig.set_tight_layout(True)
 
         # --- DISPLAY & DOWNLOAD ---
