@@ -6,8 +6,8 @@ matplotlib.use("Agg")  # Safe headless execution for cloud servers
 import matplotlib.pyplot as plt
 import io
 
-# Starplot imports
-from starplot import HorizonPlot, Observer, styles
+# Starplot imports (including '_' for database filtering expressions)
+from starplot import HorizonPlot, Observer, styles, _
 
 # Set page layout to wide for a better dashboard feel
 st.set_page_config(layout="wide", page_title="Sky Graphic Generator")
@@ -66,7 +66,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             styles.extensions.BLUE_NIGHT
         )
         
-        # VERIFIED FIX: Pass explicit tuples into 'azimuth' and 'altitude' parameters
+        # Pass explicit tuples into 'azimuth' and 'altitude' parameters
         p = HorizonPlot(
             observer=observer,
             azimuth=(az_min, az_max),
@@ -75,8 +75,9 @@ if st.button("Generate Sky Graphic", type="primary"):
             resolution=1600,             # Sharp pixel resolution for 16:9 sizing
         )
         
-        # Plot standard elements using verified kwarg overrides for high-res visibility
-        p.stars(style__label__font_color="#ffffff", style__label__font_size=11)
+        # CRITICAL FIX: Restrict calculations to stars brighter than magnitude 3.0 
+        # to prevent backend processing timeouts on the Streamlit server.
+        p.stars(where=[_.magnitude < 3.0], style__label__font_color="#ffffff", style__label__font_size=11)
         p.planets(style__label__font_color="#ffffff", style__label__font_size=13)
         p.moon(style__label__font_color="#ffffff", style__label__font_size=13)
         
