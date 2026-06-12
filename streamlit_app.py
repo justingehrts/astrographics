@@ -17,10 +17,34 @@ st.set_page_config(layout="wide", page_title="Custom Sky Graphic Generator")
 st.title("🌌 Broadcast Sky Graphic Generator")
 st.write("A lightweight, reliable engine rendering clean astronomical plates with native horizon silhouettes.")
 
-# --- SIDEBAR CONTROLS ---
+# --- SIDEBAR: 1. OBSERVATION SETTINGS ---
 st.sidebar.header("1. Observation Settings")
 obs_date = st.sidebar.date_input("Select Date", datetime.now().date())
-obs_time = st.sidebar.time_input("Select Time", time(21, 15))  
+
+# 1. GENERATE CLEAN 12-HOUR TIME STRINGS (AM/PM) WITH NAIVE TIME OBJECT VALUES
+time_options = []
+time_labels = []
+
+for hour in range(24):
+    for minute in [0, 15, 30, 45]:
+        t_obj = time(hour, minute)
+        time_options.append(t_obj)
+        
+        # Format the display label cleanly to standard 12-hour local clock time (e.g., "09:15 PM")
+        ampm_label = t_obj.strftime("%I:%M %p")
+        time_labels.append(ampm_label)
+
+# 2. DROP IN THE LOCALIZED SELECTBOX
+# We set the default index to 85, which corresponds exactly to 09:15 PM (21:15)
+selected_time_index = time_labels.index("09:15 PM") if "09:15 PM" in time_labels else 0
+
+obs_time = st.sidebar.selectbox(
+    "Select Time",
+    options=time_options,
+    format_func=lambda x: x.strftime("%I:%M %p"),
+    index=selected_time_index
+)
+
 tz_options = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"]
 selected_tz = st.sidebar.selectbox("Time Zone", tz_options, index=0)
 
