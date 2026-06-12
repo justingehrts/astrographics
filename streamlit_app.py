@@ -39,7 +39,29 @@ direction = st.sidebar.selectbox(
 # Text label controls for easy cloning/editing workflows
 st.sidebar.header("3. Graphic Toggles")
 show_labels = st.sidebar.checkbox("Show Object Labels", value=True)
+# Text label controls for easy cloning/editing workflows
+st.sidebar.header("3. Graphic Toggles")
+show_labels = st.sidebar.checkbox("Show Object Labels", value=True)
+
+# 1. THE SLIDER INSTANCE
 star_brightness = st.sidebar.slider("Star Visibility Limit", 1.0, 4.5, 2.5, step=0.5)
+
+# 2. DYNAMIC LOOKUP DICTIONARY
+# Maps the counterintuitive magnitude numbers to clean, broadcast-ready context
+sky_conditions = {
+    1.0: "🏙️ Heavy City Light Pollution (Only exceptionally bright anchor stars appear)",
+    1.5: "🌆 Urban Sky (Only major stars like Vega, Capella, or Arcturus are visible)",
+    2.0: "🏘️ Bright Suburban Sky (Standard neighborhood viewing conditions; Polaris visible)",
+    2.5: "🏡 Typical Suburban Sky (Shows the primary stars people can spot from backyards)",
+    3.0: "🌳 Dark Suburban / Rural Fringe (Fainter structural stars begin to show)",
+    3.5: "🚜 Rural Country Sky (Excellent visibility; traces out full constellation stick figures)",
+    4.0: "🌌 Very Dark Sky (Highly detailed star field; great for deep space tracking)",
+    4.5: "✨ Pristine Dark Sky / Desert Void (Maximum density; can clutter a broadcast graphic)"
+}
+
+# 3. DYNAMIC TEXT INJECTION
+# This instantly renders the mapped description right under the slider tool in the sidebar
+st.sidebar.caption(f"**Current Viewport Simulation:** \n{sky_conditions[star_brightness]}")
 
 # Map all 8 headings to strict 90-degree rectangular Azimuth spans
 az_map = {
