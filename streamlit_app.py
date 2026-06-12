@@ -109,7 +109,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_alt, _, _ = observer_loc.at(t).observe(sun).apparent().altaz()
         sun_deg = sun_alt.degrees
         
-        # 1. ATMOSPHERIC GRADIENT CALCULATOR (Softened & Multi-Tiered)
+# 1. ATMOSPHERIC GRADIENT CALCULATOR (Optimized for On-Air Contrast)
         if sun_deg > 0:
             # Daytime Sky
             top_color = "#1a66ff"      
@@ -124,16 +124,16 @@ if st.button("Generate Sky Graphic", type="primary"):
             grid_color = "#475569"
             cmap_colors = [horizon_color, mid_color, top_color]
         elif sun_deg > -12:
-            # Nautical Twilight 
-            top_color = "#090d16"      
-            horizon_color = "#1e1b4b"  
-            grid_color = "#334155"
+            # Nautical Twilight (Deep cosmic purple fade)
+            top_color = "#0b132b"      
+            horizon_color = "#1c2541"  
+            grid_color = "#475569"
             cmap_colors = [horizon_color, top_color]
         else:
-            # Full Night Space Void
-            top_color = "#030712"      
-            horizon_color = "#0b0f19"  
-            grid_color = "#1e293b"
+            # Full Night Space (Lifted midnight blue for silhouette contrast)
+            top_color = "#0b1120"      # Deep midnight slate navy
+            horizon_color = "#162238"  # Subtle ambient horizon brightness
+            grid_color = "#334155"     # Higher visibility gridlines for dark scenes
             cmap_colors = [horizon_color, top_color]
 
         # 2. INITIALIZE MATPLOTLIB CANVAS
