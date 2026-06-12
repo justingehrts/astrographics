@@ -70,7 +70,6 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_deg = sun_alt.degrees
         
         # 1. ATMOSPHERIC GRADIENT CALCULATOR
-        # Smoothly interpolates background colors based on true solar angles
         if sun_deg > 0:
             # Daytime Sky
             top_color = "#0044cc"      # Deep sky blue
@@ -83,7 +82,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             grid_color = "#415a77"
         elif sun_deg > -12:
             # Nautical Twilight (Deep purple/dark blue fade)
-            top_color = #08101a      
+            top_color = "#08101a"      
             horizon_color = "#2c1b4d"  # Fading violet glow
             grid_color = "#1d3557"
         else:
@@ -100,17 +99,16 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_ylim(0, 40)
         
         # 3. RENDER THE ATMOSPHERIC COLOR GRADIENT BACKGROUND
-        # We build a 2D vertical grid array mapping our custom twilight spectrum
         cmap = LinearSegmentedColormap.from_list("sky_gradient", [horizon_color, top_color])
         gradient_matrix = np.linspace(0, 1, 256).reshape(-1, 1)
         
         ax.imshow(
             gradient_matrix,
-            extent=[az_min, az_max, 0, 40], # Automatically maps cleanly over your exact view window
+            extent=[az_min, az_max, 0, 40], 
             cmap=cmap,
             origin="lower",
             aspect="auto",
-            zorder=0                        # Securely locked behind all stars/planets
+            zorder=0                        
         )
         
         # 4. PLOT PLANETS & MOON
