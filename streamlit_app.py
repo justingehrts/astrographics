@@ -37,14 +37,14 @@ direction = st.sidebar.selectbox(
 # Text label controls for easy cloning/editing workflows
 st.sidebar.header("3. Graphic Toggles")
 show_labels = st.sidebar.checkbox("Show Object Labels", value=True)
-star_brightness = st.sidebar.slider("Star Visibility Limit (Lower magnitude = fewer stars)", 1.0, 4.5, 2.5, step=0.5)
+star_brightness = st.sidebar.slider("Star Visibility Limit", 1.0, 4.5, 2.5, step=0.5)
 
 # Map looking direction to strict rectangular Azimuth spans
 az_map = {
     "East (Rising)": (45, 135),
     "West (Setting)": (225, 315),
     "South": (135, 225),
-    "North": (315, 405)  # Shifts North across the 360 line linearly
+    "North": (315, 405)  
 }
 az_min, az_max = az_map[direction]
 
@@ -53,11 +53,13 @@ if st.button("Generate Sky Graphic", type="primary"):
     with st.spinner("Calculating orbital ephemerides..."):
         
         # Combine inputs into a localized datetime object
-        dt_combined = datetime.combine(obs_date, obs_time, tzinfo=ZoneInfo(selected_tz))
+        dt_local = datetime.combine(obs_date, obs_time, tzinfo=ZoneInfo(selected_tz))
+        # FIXED: Convert explicitly to UTC to prevent Skyfield from choking on regional ZoneInfo objects
+        dt_utc = dt_local.astimezone(ZoneInfo("UTC"))
         
         # Initialize Skyfield ephemeris engines
         ts = load.timescale()
-        t = ts.from_datetime(dt_combined)
+        t = ts.from_datetime(dt_utc)
         eph = load('de421.bsp')
         earth = eph['earth']
         observer_loc = earth + wgs84.latlon(lat, lon)
@@ -96,16 +98,68 @@ if st.button("Generate Sky Graphic", type="primary"):
         }
         
         for name, (body, size, label) in bodies.items():
-            astrometric = observer_loc.at(t).observe(body)
-            alt, az, _ = astrometric.apparent().altaz()
-            
-            body_az = az.degrees
-            body_alt = alt.degrees
-            
-            # Adjust North coordinates to fit our linear wraparound axis
-            if direction == "North" and body_az < 90:
-                body_az += 360
+            try:
+                astrometric = observer_loc.at(t).observe(body)
+                alt, az, _ = astrometric.apparent().altaz()
                 
-            # Render if it falls within the current viewing screen window
-            if az_min <= body_az <= az_max and 0 <= body_alt <= 40:
-                color = "#ffffff" if name in ['moon', 'venus', 'jupiter'] else "#ff9999"
+                body_az = az.degrees
+                body_alt = alt.degrees
+                
+                if direction == "North" and body_az < 90:
+                    body_az += 360
+                    
+                if az_min <= body_az <= az_max and 0 <= body_alt <= 40:
+                    color = "#ffffff" if name in ['moon', 'venus', 'jupiter'] else "#ff9999"
+                    ax.scatter(body_az, body_alt, s=size, color=color, zorder=50)
+                    
+                    if show_labels:
+                        ax.text(body_az + 0.6, body_alt + 0.6, label, color="#ffffff", fontsize=11, weight='bold', zorder=51)
+            except Exception:
+                continue
+
+        # 4. PLOT TRUE CALCULATED NAVIGATIONAL STARS
+        if sun_deg <= -6:
+            star_data = [
+                ("Polaris", 1.97, (2, 31, 49.1), (89, 15, 51)),
+                ("Vega", 0.03, (18, 36, 56.3), (38, 47, 1)),
+                ("Capella", 0.08, (5, 16, 41.4), (45, 59, 53)),
+                ("Arcturus", -0.05, (14, 15, 39.7), (19, 10, 57)),
+                ("Betelgeuse", 0.50, (5, 55, 10.3), (7, 24, 25)),
+                ("Procyon", 0.34, (7, 39, 18.1), (5, 13, 30)),
+                ("Pollux", 1.14, (7, 45, 18.9), (28, 1, 34)),
+                ("Castor", 1.58, (7, 34, 36.0), (31, 53, 18)),
+                ("Spica", 0.98, (13, 25, 11.6), (-11, 9, 41)),
+                ("Altair", 0.76, (19, 50, 47.0), (8, 52, 6)),
+                ("Deneb", 1.25, (20, 41, 25.9), (45, 16, 49)),
+                ("Regulus", 1.36, (10, 8, 22.3), (11, 58, 2))
+            ]
+            
+            for name, mag, ra_tuple, dec_tuple in star_data:
+                if mag <= star_brightness:
+                    try:
+                        star_obj = Star(ra_hours=ra_tuple, dec_degrees=dec_tuple)
+                        star_astrometric = observer_loc.at(t).observe(star_obj)
+                        s_alt, s_az, _ = star_astrometric.apparent().altaz()
+                        
+                        star_az = s_az.degrees
+                        star_alt = s_alt.degrees
+                        
+                        if direction == "North" and star_az < 90:
+                            star_az += 360
+                            
+                        if az_min <= star_az <= az_max and 0 <= star_alt <= 40:
+                            size = max(4, (5.0 - mag) * 6)
+                            ax.scatter(star_az, star_alt, s=size, color="#ffffff", alpha=0.8, zorder=20)
+                            if show_labels:
+                                ax.text(star_az + 0.5, star_alt + 0.5, name, color="#ffffff", fontsize=9, alpha=0.6, zorder=21)
+                    except Exception:
+                        continue
+
+        # 5. NATIVE FOREGROUND SILHOUETTE ENGINE
+        x_space = np.linspace(az_min, az_max, 400)
+        base_ground = 4.0 + 1.0 * np.sin(x_space / 5)
+        tree_canopy = 1.2 * np.sin(x_space * 2.5) * np.cos(x_space * 0.4)
+        fine_foliage = 0.5 * np.sin(x_space * 12.0)
+        
+        y_treeline = base_ground + tree_canopy + fine_foliage
+        y_treeline = np.clip(y_treeline
