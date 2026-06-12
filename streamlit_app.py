@@ -29,10 +29,11 @@ lat = st.sidebar.number_input("Latitude", value=40.00, step=0.01, format="%.2f")
 lon = st.sidebar.number_input("Longitude", value=-83.10, step=0.01, format="%.2f")
 
 st.sidebar.header("2. View Window")
+# Overhauled: Standard clean 8-point cardinal layout
 direction = st.sidebar.selectbox(
     "Looking Direction", 
-    ["East (Rising)", "West (Setting)", "South", "North"], 
-    index=1  # Default to West
+    ["North", "Northeast", "East", "Southeast", "South", "Southwest", "West", "Northwest"], 
+    index=6  # Default to West
 )
 
 # Text label controls for easy cloning/editing workflows
@@ -40,12 +41,16 @@ st.sidebar.header("3. Graphic Toggles")
 show_labels = st.sidebar.checkbox("Show Object Labels", value=True)
 star_brightness = st.sidebar.slider("Star Visibility Limit", 1.0, 4.5, 2.5, step=0.5)
 
-# Map looking direction to strict rectangular Azimuth spans
+# Map all 8 headings to strict 90-degree rectangular Azimuth spans
 az_map = {
-    "East (Rising)": (45, 135),
-    "West (Setting)": (225, 315),
+    "North": (315, 405),
+    "Northeast": (0, 90),
+    "East": (45, 135),
+    "Southeast": (90, 180),
     "South": (135, 225),
-    "North": (315, 405)  
+    "Southwest": (180, 270),
+    "West": (225, 315),
+    "Northwest": (270, 360)
 }
 az_min, az_max = az_map[direction]
 
@@ -71,22 +76,18 @@ if st.button("Generate Sky Graphic", type="primary"):
         
         # 1. ATMOSPHERIC GRADIENT CALCULATOR
         if sun_deg > 0:
-            # Daytime Sky
-            top_color = "#0044cc"      # Deep sky blue
+            top_color = "#0044cc"      # Daytime Blue
             horizon_color = "#66ccff"  # Bright atmospheric horizon blue
             grid_color = "#ffffff"
         elif sun_deg > -6:
-            # Civil Twilight (Vibrant broadcast orange/blue shift)
             top_color = "#101f35"      # Deep midnight dusk blue
             horizon_color = "#e65c00"  # Rich sunset orange right at the horizon line
             grid_color = "#415a77"
         elif sun_deg > -12:
-            # Nautical Twilight (Deep purple/dark blue fade)
             top_color = "#08101a"      
             horizon_color = "#2c1b4d"  # Fading violet glow
             grid_color = "#1d3557"
         else:
-            # Full Night Space Void
             top_color = "#050a0f"      
             horizon_color = "#0c141c"  # Minimal background ambient scatter
             grid_color = "#1d3557"
@@ -129,6 +130,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                 body_az = az.degrees
                 body_alt = alt.degrees
                 
+                # Dynamic linear adjustments for northern horizon wraparounds
                 if direction == "North" and body_az < 90:
                     body_az += 360
                     
@@ -209,6 +211,6 @@ if st.button("Generate Sky Graphic", type="primary"):
         st.download_button(
             label="💾 Download High-Res PNG for Editing / On-Air",
             data=img_buf,
-            file_name=f"custom_sky_{direction.split()[0]}.png",
+            file_name=f"custom_sky_{direction}.png",
             mime="image/png"
         )
