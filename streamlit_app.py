@@ -8,7 +8,7 @@ import io
 import numpy as np
 
 # Core astronomical math engine
-from skyfield.api import load, wgs84
+from skyfield.api import load, wgs84, Star
 
 # Set page layout to wide for a clean dashboard feel
 st.set_page_config(layout="wide", page_title="Custom Sky Graphic Generator")
@@ -86,13 +86,14 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_ylim(0, 40)
         
         # 3. PLOT PLANETS & MOON
+        # FIXED: Targets are re-mapped to use Skyfield's direct kernel attributes smoothly
         bodies = {
             'moon': (eph['moon'], 180, '🌙 Moon'),
             'mercury': (eph['mercury'], 40, 'Mercury'),
             'venus': (eph['venus'], 70, 'Venus'),
             'mars': (eph['mars'], 40, 'Mars'),
-            'jupiter': (eph['jupiter'], 90, 'Jupiter'),
-            'saturn': (eph['saturn'], 60, 'Saturn')
+            'jupiter': (eph['jupiter_barycenter'], 90, 'Jupiter'),
+            'saturn': (eph['saturn_barycenter'], 60, 'Saturn')
         }
         
         for name, (body, size, label) in bodies.items():
@@ -114,30 +115,43 @@ if st.button("Generate Sky Graphic", type="primary"):
                 if show_labels:
                     ax.text(body_az + 0.6, body_alt + 0.6, label, color="#ffffff", fontsize=11, weight='bold', zorder=51)
 
-        # 4. PLOT PROMINENT BRIGHT NAVIGATIONAL STARS
+        # 4. PLOT TRUE CALCULATED NAVIGATIONAL STARS
         if sun_deg <= -6:
-            # High-visibility star catalog mapping: (Name, Magnitude, Approximate Azimuth Offset, Base Altitude)
-            # This handles clean vector positioning tailored directly to our seasonal view frames
-            star_catalog = [
-                ('Polaris', 2.0, 360.0, 40.0), ('Vega', 0.0, 75.0, 35.0), 
-                ('Capella', 0.1, 330.0, 15.0), ('Arcturus', -0.05, 200.0, 38.0),
-                ('Betelgeuse', 0.5, 255.0, 12.0), ('Procyon', 0.4, 240.0, 8.0), 
-                ('Pollux', 1.1, 295.0, 22.0), ('Castor', 1.6, 297.0, 24.0),
-                ('Spica', 1.0, 185.0, 25.0), ('Altair', 0.8, 95.0, 20.0),
-                ('Deneb', 1.2, 60.0, 30.0), ('Regulus', 1.4, 245.0, 32.0)
+            # Verified catalog of the brightest stars using true celestial coordinates (RA/Dec)
+            # This completely bypasses the need to read heavy external database files on reload
+            star_data = [
+                ("Polaris", 1.97, "02h31m49.1s", "+89d15m51s"),
+                ("Vega", 0.03, "18h36m56.3s", "+38d47m01s"),
+                ("Capella", 0.08, "05h16m41.4s", "+45d59m53s"),
+                ("Arcturus", -0.05, "14h15m39.7s", "+19d10m57s"),
+                ("Betelgeuse", 0.50, "05h55m10.3s", "+07d24m25s"),
+                ("Procyon", 0.34, "07h39m18.1s", "+05d13m30s"),
+                ("Pollux", 1.14, "07h45m18.9s", "+28d01m34s"),
+                ("Castor", 1.58, "07h34m36.0s", "+31d53m18s"),
+                ("Spica", 0.98, "13h25m11.6s", "-11d09m41s"),
+                ("Altair", 0.76, "19h50m47.0s", "+08d52m06s"),
+                ("Deneb", 1.25, "20h41m25.9s", "+45d16m49s"),
+                ("Regulus", 1.36, "10h08m22.3s", "+11d58m02s")
             ]
             
-            for name, mag, s_az, s_alt in star_catalog:
+            for name, mag, ra_str, dec_str in star_data:
                 if mag <= star_brightness:
-                    # Adjust linear azimuth for northern boundaries if needed
-                    if direction == "North" and s_az < 90:
-                        s_az += 360
+                    # Dynamically compute exact Alt/Az paths based on your location parameters
+                    star_obj = Star(ra_hours=ra_str, dec_degrees=dec_str)
+                    star_astrometric = observer_loc.at(t).observe(star_obj)
+                    s_alt, s_az, _ = star_astrometric.apparent().altaz()
+                    
+                    star_az = s_az.degrees
+                    star_alt = s_alt.degrees
+                    
+                    if direction == "North" and star_az < 90:
+                        star_az += 360
                         
-                    if az_min <= s_az <= az_max and 0 <= s_alt <= 40:
+                    if az_min <= star_az <= az_max and 0 <= star_alt <= 40:
                         size = max(4, (5.0 - mag) * 6)
-                        ax.scatter(s_az, s_alt, s=size, color="#ffffff", alpha=0.8, zorder=20)
+                        ax.scatter(star_az, star_alt, s=size, color="#ffffff", alpha=0.8, zorder=20)
                         if show_labels:
-                            ax.text(s_az + 0.5, s_alt + 0.5, name, color="#ffffff", fontsize=9, alpha=0.6, zorder=21)
+                            ax.text(star_az + 0.5, star_alt + 0.5, name, color="#ffffff", fontsize=9, alpha=0.6, zorder=21)
 
         # 5. NATIVE FOREGROUND SILHOUETTE ENGINE
         # This standard rectangular array runs directly across our established azimuth range
