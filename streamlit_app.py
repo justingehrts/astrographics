@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 import matplotlib
 matplotlib.use("Agg")  # Safe headless execution for cloud servers
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 import io
 import numpy as np
 
@@ -50,11 +51,10 @@ az_min, az_max = az_map[direction]
 
 # --- GRAPHIC GENERATION LOGIC ---
 if st.button("Generate Sky Graphic", type="primary"):
-    with st.spinner("Calculating orbital ephemerides..."):
+    with st.spinner("Calculating orbital ephemerides and atmospheric gradients..."):
         
         # Combine inputs into a localized datetime object
         dt_local = datetime.combine(obs_date, obs_time, tzinfo=ZoneInfo(selected_tz))
-        # FIXED: Convert explicitly to UTC to prevent Skyfield from choking on regional ZoneInfo objects
         dt_utc = dt_local.astimezone(ZoneInfo("UTC"))
         
         # Initialize Skyfield ephemeris engines
@@ -64,30 +64,56 @@ if st.button("Generate Sky Graphic", type="primary"):
         earth = eph['earth']
         observer_loc = earth + wgs84.latlon(lat, lon)
         
-        # 1. CALCULATE DYNAMIC BACKGROUND COLOR (Via Sun Position)
+        # Calculate the sun's altitude relative to your horizon
         sun = eph['sun']
         sun_alt, _, _ = observer_loc.at(t).observe(sun).apparent().altaz()
         sun_deg = sun_alt.degrees
         
+        # 1. ATMOSPHERIC GRADIENT CALCULATOR
+        # Smoothly interpolates background colors based on true solar angles
         if sun_deg > 0:
-            sky_color = "#1a75ff"       # Daytime Blue
-            grid_color = "#66a3ff"
+            # Daytime Sky
+            top_color = "#0044cc"      # Deep sky blue
+            horizon_color = "#66ccff"  # Bright atmospheric horizon blue
+            grid_color = "#ffffff"
         elif sun_deg > -6:
-            sky_color = "#1d2d44"       # Twilight Blue
+            # Civil Twilight (Vibrant broadcast orange/blue shift)
+            top_color = "#101f35"      # Deep midnight dusk blue
+            horizon_color = "#e65c00"  # Rich sunset orange right at the horizon line
             grid_color = "#415a77"
+        elif sun_deg > -12:
+            # Nautical Twilight (Deep purple/dark blue fade)
+            top_color = #08101a      
+            horizon_color = "#2c1b4d"  # Fading violet glow
+            grid_color = "#1d3557"
         else:
-            sky_color = "#0c1821"       # Deep Night Void
+            # Full Night Space Void
+            top_color = "#050a0f"      
+            horizon_color = "#0c141c"  # Minimal background ambient scatter
             grid_color = "#1d3557"
 
-        # 2. INITIALIZE STANDARD MATPLOTLIB CANVAS
-        fig, ax = plt.subplots(figsize=(12, 6.75), facecolor=sky_color)
-        ax.set_facecolor(sky_color)
+        # 2. INITIALIZE MATPLOTLIB CANVAS
+        fig, ax = plt.subplots(figsize=(12, 6.75))
         
         # Force strict bounding coordinate limits (Altitude locked from 0° to 40° high)
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
-        # 3. PLOT PLANETS & MOON
+        # 3. RENDER THE ATMOSPHERIC COLOR GRADIENT BACKGROUND
+        # We build a 2D vertical grid array mapping our custom twilight spectrum
+        cmap = LinearSegmentedColormap.from_list("sky_gradient", [horizon_color, top_color])
+        gradient_matrix = np.linspace(0, 1, 256).reshape(-1, 1)
+        
+        ax.imshow(
+            gradient_matrix,
+            extent=[az_min, az_max, 0, 40], # Automatically maps cleanly over your exact view window
+            cmap=cmap,
+            origin="lower",
+            aspect="auto",
+            zorder=0                        # Securely locked behind all stars/planets
+        )
+        
+        # 4. PLOT PLANETS & MOON
         bodies = {
             'moon': (eph['moon'], 180, '🌙 Moon'),
             'mercury': (eph['mercury'], 40, 'Mercury'),
@@ -117,7 +143,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             except Exception:
                 continue
 
-        # 4. PLOT TRUE CALCULATED NAVIGATIONAL STARS
+        # 5. PLOT TRUE CALCULATED NAVIGATIONAL STARS
         if sun_deg <= -6:
             star_data = [
                 ("Polaris", 1.97, (2, 31, 49.1), (89, 15, 51)),
@@ -155,7 +181,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                     except Exception:
                         continue
 
-        # 5. NATIVE FOREGROUND SILHOUETTE ENGINE
+        # 6. NATIVE FOREGROUND SILHOUETTE ENGINE
         x_space = np.linspace(az_min, az_max, 400)
         base_ground = 4.0 + 1.0 * np.sin(x_space / 5)
         tree_canopy = 1.2 * np.sin(x_space * 2.5) * np.cos(x_space * 0.4)
@@ -167,7 +193,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.fill_between(x_space, -5, y_treeline, color="#060c14", zorder=100)
         
         # Clean up gridline decorations and formatting
-        ax.grid(True, color=grid_color, alpha=0.2, linestyle='--', zorder=2)
+        ax.grid(True, color=grid_color, alpha=0.15, linestyle='--', zorder=2)
         ax.set_xlabel("Azimuth (Degrees)", color="#ffffff")
         ax.set_ylabel("Altitude (Degrees)", color="#ffffff")
         ax.tick_params(colors='#ffffff')
@@ -179,7 +205,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         st.pyplot(fig)
         
         img_buf = io.BytesIO()
-        fig.savefig(img_buf, format="png", bbox_inches='tight', dpi=150, facecolor=fig.get_facecolor())
+        fig.savefig(img_buf, format="png", bbox_inches='tight', dpi=150, facecolor=top_color)
         img_buf.seek(0)
         
         st.download_button(
