@@ -17,11 +17,11 @@ st.set_page_config(layout="wide", page_title="Custom Sky Graphic Generator")
 st.title("🌌 Broadcast Sky Graphic Generator")
 st.write("A lightweight, reliable engine rendering clean astronomical plates with native horizon silhouettes.")
 
-# --- SIDEBAR: 1. OBSERVATION SETTINGS ---
+# --- SIDEBAR CONTROLS ---
 st.sidebar.header("1. Observation Settings")
 obs_date = st.sidebar.date_input("Select Date", datetime.now().date())
 
-# 1. GENERATE CLEAN 12-HOUR TIME STRINGS (AM/PM) WITH NAIVE TIME OBJECT VALUES
+# Generate clean 12-hour time strings (AM/PM) with naive time object values
 time_options = []
 time_labels = []
 
@@ -30,12 +30,10 @@ for hour in range(24):
         t_obj = time(hour, minute)
         time_options.append(t_obj)
         
-        # Format the display label cleanly to standard 12-hour local clock time (e.g., "09:15 PM")
         ampm_label = t_obj.strftime("%I:%M %p")
         time_labels.append(ampm_label)
 
-# 2. DROP IN THE LOCALIZED SELECTBOX
-# We set the default index to 85, which corresponds exactly to 09:15 PM (21:15)
+# Set default index to 09:15 PM
 selected_time_index = time_labels.index("09:15 PM") if "09:15 PM" in time_labels else 0
 
 obs_time = st.sidebar.selectbox(
@@ -53,7 +51,6 @@ lat = st.sidebar.number_input("Latitude", value=40.00, step=0.01, format="%.2f")
 lon = st.sidebar.number_input("Longitude", value=-83.10, step=0.01, format="%.2f")
 
 st.sidebar.header("2. View Window")
-# Overhauled: Standard clean 8-point cardinal layout
 direction = st.sidebar.selectbox(
     "Looking Direction", 
     ["North", "Northeast", "East", "Southeast", "South", "Southwest", "West", "Northwest"], 
@@ -63,13 +60,9 @@ direction = st.sidebar.selectbox(
 # --- SIDEBAR: 3. GRAPHIC TOGGLES ---
 st.sidebar.header("3. Graphic Toggles")
 
-# Declared exactly once to prevent Duplicate Element ID errors
 show_labels = st.sidebar.checkbox("Show Object Labels", value=True)
-
-# The brightness slider instance
 star_brightness = st.sidebar.slider("Star Visibility Limit", 1.0, 4.5, 2.5, step=0.5)
 
-# Dynamic lookup map for on-screen context descriptions
 sky_conditions = {
     1.0: "🏙️ Heavy City Light Pollution (Only exceptionally bright anchor stars appear)",
     1.5: "🌆 Urban Sky (Only major stars like Vega, Capella, or Arcturus are visible)",
@@ -81,7 +74,6 @@ sky_conditions = {
     4.5: "✨ Pristine Dark Sky / Desert Void (Maximum density; can clutter a broadcast graphic)"
 }
 
-# Injects the description caption natively right below the slider widget
 st.sidebar.caption(f"**Current Viewport Simulation:** \n{sky_conditions[star_brightness]}")
 
 # Map all 8 headings to strict 90-degree rectangular Azimuth spans
@@ -117,23 +109,32 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_alt, _, _ = observer_loc.at(t).observe(sun).apparent().altaz()
         sun_deg = sun_alt.degrees
         
-        # 1. ATMOSPHERIC GRADIENT CALCULATOR
+        # 1. ATMOSPHERIC GRADIENT CALCULATOR (Softened & Multi-Tiered)
         if sun_deg > 0:
-            top_color = "#0044cc"      # Daytime Blue
-            horizon_color = "#66ccff"  # Bright atmospheric horizon blue
+            # Daytime Sky
+            top_color = "#1a66ff"      
+            horizon_color = "#99ccff"  
             grid_color = "#ffffff"
+            cmap_colors = [horizon_color, top_color]
         elif sun_deg > -6:
-            top_color = "#101f35"      # Deep midnight dusk blue
-            horizon_color = "#e65c00"  # Rich sunset orange right at the horizon line
-            grid_color = "#415a77"
+            # Civil Twilight (Softened broadcast amber-plum-navy shift)
+            top_color = "#0f172a"      # Deep evening slate
+            mid_color = "#3b2d54"      # Soft atmospheric plum/berry transition
+            horizon_color = "#d48a3b"  # Muted golden twilight amber
+            grid_color = "#475569"
+            cmap_colors = [horizon_color, mid_color, top_color]
         elif sun_deg > -12:
-            top_color = "#08101a"      
-            horizon_color = "#2c1b4d"  # Fading violet glow
-            grid_color = "#1d3557"
+            # Nautical Twilight 
+            top_color = "#090d16"      
+            horizon_color = "#1e1b4b"  
+            grid_color = "#334155"
+            cmap_colors = [horizon_color, top_color]
         else:
-            top_color = "#050a0f"      
-            horizon_color = "#0c141c"  # Minimal background ambient scatter
-            grid_color = "#1d3557"
+            # Full Night Space Void
+            top_color = "#030712"      
+            horizon_color = "#0b0f19"  
+            grid_color = "#1e293b"
+            cmap_colors = [horizon_color, top_color]
 
         # 2. INITIALIZE MATPLOTLIB CANVAS
         fig, ax = plt.subplots(figsize=(12, 6.75))
@@ -143,7 +144,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_ylim(0, 40)
         
         # 3. RENDER THE ATMOSPHERIC COLOR GRADIENT BACKGROUND
-        cmap = LinearSegmentedColormap.from_list("sky_gradient", [horizon_color, top_color])
+        cmap = LinearSegmentedColormap.from_list("sky_gradient", cmap_colors)
         gradient_matrix = np.linspace(0, 1, 256).reshape(-1, 1)
         
         ax.imshow(
@@ -173,7 +174,6 @@ if st.button("Generate Sky Graphic", type="primary"):
                 body_az = az.degrees
                 body_alt = alt.degrees
                 
-                # Dynamic linear adjustments for northern horizon wraparounds
                 if direction == "North" and body_az < 90:
                     body_az += 360
                     
