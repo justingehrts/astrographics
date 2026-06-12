@@ -162,4 +162,29 @@ if st.button("Generate Sky Graphic", type="primary"):
         fine_foliage = 0.5 * np.sin(x_space * 12.0)
         
         y_treeline = base_ground + tree_canopy + fine_foliage
-        y_treeline = np.clip(y_treeline
+        y_treeline = np.clip(y_treeline, 2.0, 10.0)
+        
+        ax.fill_between(x_space, -5, y_treeline, color="#060c14", zorder=100)
+        
+        # Clean up gridline decorations and formatting
+        ax.grid(True, color=grid_color, alpha=0.2, linestyle='--', zorder=2)
+        ax.set_xlabel("Azimuth (Degrees)", color="#ffffff")
+        ax.set_ylabel("Altitude (Degrees)", color="#ffffff")
+        ax.tick_params(colors='#ffffff')
+        
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        # --- DISPLAY & DOWNLOAD ---
+        st.pyplot(fig)
+        
+        img_buf = io.BytesIO()
+        fig.savefig(img_buf, format="png", bbox_inches='tight', dpi=150, facecolor=fig.get_facecolor())
+        img_buf.seek(0)
+        
+        st.download_button(
+            label="💾 Download High-Res PNG for Editing / On-Air",
+            data=img_buf,
+            file_name=f"custom_sky_{direction.split()[0]}.png",
+            mime="image/png"
+        )
