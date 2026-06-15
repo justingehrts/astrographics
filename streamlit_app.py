@@ -284,10 +284,15 @@ if st.button("Generate Sky Graphic", type="primary"):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        # --- DISPLAY & DOWNLOAD ---
+# --- DISPLAY & DOWNLOAD ---
+        # 1. Render natively to the Streamlit dashboard web interface
         st.pyplot(fig)
         
+        # 2. Extract raw binary streams from the active plot object
         img_buf = io.BytesIO()
+        
+        # Forces the figure canvas background to transparent and overrides tight bbox clip calculations.
+        # This locks the dynamic gradient image edge-to-edge on your downloaded PNG.
         fig.savefig(
             img_buf, 
             format="png", 
@@ -298,7 +303,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         )
         img_buf.seek(0)
         
-       st.download_button(
+        # 3. Trigger the browser downloader callback
+        st.download_button(
             label="💾 Download High-Res PNG for Editing / On-Air",
             data=img_buf,
             file_name=f"custom_sky_{direction}.png",
