@@ -298,4 +298,10 @@ if st.button("Generate Sky Graphic", type="primary"):
         )
         img_buf.seek(0)
         
-        st.
+       st.download_button(
+            label="💾 Download High-Res PNG for Editing / On-Air",
+            data=img_buf,
+            file_name=f"custom_sky_{direction}.png",
+            mime="image/png"
+        )
+st.
