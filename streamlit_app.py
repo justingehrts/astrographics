@@ -161,8 +161,28 @@ if st.button("Generate Sky Graphic", type="primary"):
             zorder=0                        
         )
         
+        # NEW ENGINE: URBAN SKY GLOW DOME
+        # Generates a soft atmospheric light wash if city environments are chosen
+        if star_brightness <= 1.5 and sun_deg <= 0:
+            # Create a localized spatial grid mesh over the current viewport
+            x_grid = np.linspace(az_min, az_max, 100)
+            y_grid = np.linspace(0, 40, 100)
+            X_m, Y_m = np.meshgrid(x_grid, y_grid)
+            
+            # Center the light dome right in the middle of the selected camera frame
+            center_az = (az_min + az_max) / 2.0
+            
+            # Control the scatter radius (sigma): 25 degrees wide, 12 degrees high
+            glow_intensity = np.exp(-((X_m - center_az) / 25.0)**2 - (Y_m / 12.0)**2)
+            
+            # Map a warm high-pressure sodium/LED broadcast glow color palette
+            glow_color = "#df9f66" if star_brightness == 1.0 else "#c68353"
+            glow_cmap = LinearSegmentedColormap.from_list("glow", ["#ffffff", glow_color])
+            
+            # Project the mathematical dome into the scene with high level transparency
+            ax.contourf(X_m, Y_m, glow_intensity, levels=30, cmap=glow_cmap, alpha=0.18, zorder=1)
+
         # 4. PLOT PLANETS & MOON
-        # FIXED: Removed the emoji wireframe fallback token from the Moon parameter string
         bodies = {
             'moon': (eph['moon'], 180, 'Moon'),
             'mercury': (eph['mercury'], 40, 'Mercury'),
@@ -238,7 +258,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         y_silhouette = base_ground + tree_canopy + fine_foliage
         y_silhouette = np.clip(y_silhouette, 2.0, 10.0)
 
-        # Draw tree canopy layer
+        # Draw tree canopy layer over the top of the urban light dome
         ax.fill_between(x_space, -5, y_silhouette, color="#060c14", zorder=100)
         
         # Clean up gridline decorations and formatting
@@ -251,14 +271,9 @@ if st.button("Generate Sky Graphic", type="primary"):
             spine.set_visible(False)
 
         # --- DISPLAY & DOWNLOAD ---
-        # 1. Render natively to the Streamlit dashboard web interface
         st.pyplot(fig)
         
-        # 2. Extract raw binary streams from the active plot object
         img_buf = io.BytesIO()
-        
-        # FIXED: Forces the figure canvas background to transparent and overrides tight bbox clip calculations.
-        # This locks the dynamic gradient image edge-to-edge on your downloaded PNG.
         fig.savefig(
             img_buf, 
             format="png", 
@@ -269,7 +284,6 @@ if st.button("Generate Sky Graphic", type="primary"):
         )
         img_buf.seek(0)
         
-        # 3. Trigger the browser downloader callback
         st.download_button(
             label="💾 Download High-Res PNG for Editing / On-Air",
             data=img_buf,
