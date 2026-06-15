@@ -161,43 +161,39 @@ if st.button("Generate Sky Graphic", type="primary"):
             zorder=0                        
         )
         
-# --- ENGINE: URBAN SKY GLOW DOME (REWRITTEN FOR IMAGE MESH BLENDING) ---
+        # --- FIXED ENGINE: URBAN SKY GLOW DOME IMAGE OVERLAY ---
         if star_brightness <= 1.5 and sun_deg <= 0:
-            # 1. Establish a high-resolution pixel canvas over the exact view boundaries
             x_pixels = 200
             y_pixels = 100
             x_grid = np.linspace(az_min, az_max, x_pixels)
             y_grid = np.linspace(0, 40, y_pixels)
             X_m, Y_m = np.meshgrid(x_grid, y_grid)
             
-            # 2. Pin the dome's focal center to the middle of the selected camera frame
             center_az = (az_min + az_max) / 2.0
             
-            # 3. Calculate a high-fidelity 2D Gaussian light array (Sigma: 22° Az, 10° Alt)
-            # This locks the glow low to the horizon and prevents it from bleeding to the top
-            gaussian_glow = np.exp(-((X_m - center_az) / 22.0)**2 - (Y_m / 10.0)**2)
+            # Mathematical 2D Gaussian curve defining the light dome boundaries
+            gaussian_glow = np.exp(-((X_m - center_az) / 24.0)**2 - (Y_m / 14.0)**2)
             
-            # 4. Map the warm ambient color profile based on urban density settings
-            # 1.0 (Heavy City) gets a thick, warm amber wash; 1.5 (Urban) gets a softer blend
-            glow_base_color = "#e2a673" if star_brightness == 1.0 else "#c98d5e"
+            # Independent, vivid sodium/LED color profiles that pierce true midnight dark parameters
+            # 1.0 (Heavy City) uses a rich golden-amber; 1.5 (Urban) gets a slightly softer copper tone
+            glow_base_color = "#e2964d" if star_brightness == 1.0 else "#c97e3a"
             
-            # Build a custom alpha-channeled colormap that transitions from 100% transparent to colored
-            # This guarantees that the light dome melts perfectly into the underlying twilight sky
+            # Construct a dedicated RGBA pixel array to force clean, unclipped alpha transitions
             rgba_glow = np.zeros((y_pixels, x_pixels, 4))
             rgb_target = np.array(matplotlib.colors.to_rgb(glow_base_color))
             
             rgba_glow[..., :3] = rgb_target
-            # Lock the peak opacity to 25% at the core so it doesn't wash out planet markers
-            rgba_glow[..., 3] = gaussian_glow * 0.25  
             
-            # 5. Project the solid alpha-mask directly onto the canvas
+            # Fixed opacity curve capping the light dome center cleanly at 32% visibility
+            rgba_glow[..., 3] = gaussian_glow * 0.32  
+            
             ax.imshow(
                 rgba_glow,
                 extent=[az_min, az_max, 0, 40],
                 origin="lower",
                 aspect="auto",
-                zorder=1,    # Sits perfectly in front of the background, behind the trees
-                interpolation="bilinear" # Forces a perfectly smooth, photorealistic transition
+                zorder=1,    # Anchored right in front of the sky mesh, behind the tree silhouettes
+                interpolation="bilinear"
             )
 
         # 4. PLOT PLANETS & MOON
@@ -302,9 +298,4 @@ if st.button("Generate Sky Graphic", type="primary"):
         )
         img_buf.seek(0)
         
-        st.download_button(
-            label="💾 Download High-Res PNG for Editing / On-Air",
-            data=img_buf,
-            file_name=f"custom_sky_{direction}.png",
-            mime="image/png"
-        )
+        st.
