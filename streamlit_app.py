@@ -109,11 +109,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_astrometric = observer_loc.at(t).observe(sun)
         sun_alt, sun_az, _ = sun_astrometric.apparent().altaz()
         sun_deg = sun_alt.degrees
-        s_az_deg = sun_az.degrees
         
-        # 1. HIGH-FIDELITY ANALYTICAL SKY MATHEMATICAL GRADIENT MODEL
-        # We use standard interpolation parameters to compute continuous RGB channels
-        # completely preventing step-wise color jumping across time edits.
+        # 1. ATMOSPHERIC GRADIENT CALCULATOR
         if sun_deg > 0:
             # Daytime sky blend model
             top_rgb = np.array([26, 102, 255]) / 255.0
@@ -122,27 +119,23 @@ if st.button("Generate Sky Graphic", type="primary"):
             cmap_colors = [horizon_rgb, top_rgb]
         else:
             # Twilight & Night continuous equation mapping based on solar dip angles
-            # Normalize the sun's position from sunset down to full midnight dark window [0, -18]
             solar_dip = np.clip(abs(sun_deg), 0, 18)
             
             # Continuous factor mappings for top and base sky components
             t_factor = np.clip((solar_dip / 12.0), 0, 1)
             h_factor = np.clip((solar_dip / 8.0), 0, 1)
             
-            # Compute analytical continuous top frame matrix colors
             top_dusk = np.array([15, 23, 42]) / 255.0
             top_night = np.array([11, 17, 32]) / 255.0
             top_rgb = top_dusk * (1.0 - t_factor) + top_night * t_factor
             
-            # Compute analytical horizon colors (Smooth golden glow to deep obsidian shift)
-            horiz_twilight = np.array([212, 138, 59]) / 255.0  # Muted warm amber gold
-            horiz_night = np.array([22, 34, 56]) / 255.0       # Higher contrast midnight base
+            horiz_twilight = np.array([212, 138, 59]) / 255.0  
+            horiz_night = np.array([22, 34, 56]) / 255.0       
             horizon_rgb = horiz_twilight * (1.0 - h_factor) + horiz_night * h_factor
             
-            # If we are in active civil twilight, inject a scattering midpoint color node
             if solar_dip < 6.0:
                 mid_factor = solar_dip / 6.0
-                mid_twilight = np.array([59, 45, 84]) / 255.0  # Atmospheric plum scattering
+                mid_twilight = np.array([59, 45, 84]) / 255.0  
                 mid_rgb = mid_twilight * (1.0 - mid_factor) + horiz_night * mid_factor
                 cmap_colors = [horizon_rgb, mid_rgb, top_rgb]
                 grid_color = "#475569"
@@ -174,115 +167,4 @@ if st.button("Generate Sky Graphic", type="primary"):
             'mercury': (eph['mercury'], 40, 'Mercury'),
             'venus': (eph['venus'], 70, 'Venus'),
             'mars': (eph['mars'], 40, 'Mars'),
-            'jupiter': (eph['jupiter_barycenter'], 90, 'Jupiter'),
-            'saturn': (eph['saturn_barycenter'], 60, 'Saturn')
-        }
-        
-        for name, (body, size, label) in bodies.items():
-            try:
-                astrometric = observer_loc.at(t).observe(body)
-                alt, az, _ = astrometric.apparent().altaz()
-                
-                body_az = az.degrees
-                body_alt = alt.degrees
-                
-                if direction == "North" and body_az < 90:
-                    body_az += 360
-                    
-                if az_min <= body_az <= az_max and 0 <= body_alt <= 40:
-                    color = "#ffffff" if name in ['moon', 'venus', 'jupiter'] else "#ff9999"
-                    ax.scatter(body_az, body_alt, s=size, color=color, zorder=50)
-                    
-                    if show_labels:
-                        ax.text(body_az + 0.6, body_alt + 0.6, label, color="#ffffff", fontsize=11, weight='bold', zorder=51)
-            except Exception:
-                continue
-
-        # 5. PLOT TRUE CALCULATED NAVIGATIONAL STARS
-        if sun_deg <= -6:
-            star_data = [
-                ("Polaris", 1.97, (2, 31, 49.1), (89, 15, 51)),
-                ("Vega", 0.03, (18, 36, 56.3), (38, 47, 1)),
-                ("Capella", 0.08, (5, 16, 41.4), (45, 59, 53)),
-                ("Arcturus", -0.05, (14, 15, 39.7), (19, 10, 57)),
-                ("Betelgeuse", 0.50, (5, 55, 10.3), (7, 24, 25)),
-                ("Procyon", 0.34, (7, 39, 18.1), (5, 13, 30)),
-                ("Pollux", 1.14, (7, 45, 18.9), (28, 1, 34)),
-                ("Castor", 1.58, (7, 34, 36.0), (31, 53, 18)),
-                ("Spica", 0.98, (13, 25, 11.6), (-11, 9, 41)),
-                ("Altair", 0.76, (19, 50, 47.0), (8, 52, 6)),
-                ("Deneb", 1.25, (20, 41, 25.9), (45, 16, 49)),
-                ("Regulus", 1.36, (10, 8, 22.3), (11, 58, 2))
-            ]
-            
-            for name, mag, ra_tuple, dec_tuple in star_data:
-                if mag <= star_brightness:
-                    try:
-                        star_obj = Star(ra_hours=ra_tuple, dec_degrees=dec_tuple)
-                        star_astrometric = observer_loc.at(t).observe(star_obj)
-                        s_alt, s_az, _ = star_astrometric.apparent().altaz()
-                        
-                        star_az = s_az.degrees
-                        star_alt = s_alt.degrees
-                        
-                        if direction == "North" and star_az < 90:
-                            star_az += 360
-                            
-                        if az_min <= star_az <= az_max and 0 <= star_alt <= 40:
-                            size = max(4, (5.0 - mag) * 6)
-                            ax.scatter(star_az, star_alt, s=size, color="#ffffff", alpha=0.8, zorder=20)
-                            if show_labels:
-                                ax.text(star_az + 0.5, star_alt + 0.5, name, color="#ffffff", fontsize=9, alpha=0.6, zorder=21)
-                    except Exception:
-                        continue
-
-        # 6. DYNAMIC SILHOUETTE ENVIRONMENT ENGINE
-        x_space = np.linspace(az_min, az_max, 400)
-        
-        if star_brightness <= 1.5:
-            # ENVIRONMENT: CITYSCAPE (Geometric buildings & antennas)
-            base_city = 3.5 + 1.5 * np.sign(np.sin(x_space / 2)) * np.cos(x_space / 3)
-            skyscrapers = 2.0 * np.sign(np.sin(x_space * 1.5)) * (np.sin(x_space / 0.8) > 0.7)
-            antennas = 5.0 * (np.abs(np.sin(x_space * 4.0)) > 0.992)
-            y_silhouette = base_city + skyscrapers + antennas
-            y_silhouette = np.clip(y_silhouette, 1.5, 9.0)
-            
-        elif star_brightness <= 3.0:
-            # ENVIRONMENT: SUBURBAN FOREST (Classic hardwood tree canopy)
-            base_ground = 4.0 + 1.0 * np.sin(x_space / 5)
-            tree_canopy = 1.2 * np.sin(x_space * 2.5) * np.cos(x_space * 0.4)
-            fine_foliage = 0.5 * np.sin(x_space * 12.0)
-            y_silhouette = base_ground + tree_canopy + fine_foliage
-            y_silhouette = np.clip(y_silhouette, 2.0, 10.0)
-            
-        else:
-            # ENVIRONMENT: RURAL PASTURE (Smooth, rolling open country country range)
-            y_silhouette = 1.8 + 0.6 * np.sin(x_space / 12) + 0.1 * np.cos(x_space / 2)
-            y_silhouette = np.clip(y_silhouette, 0.8, 4.0)
-
-        # Draw the chosen dynamic landscape environment onto the frame canvas layer
-        ax.fill_between(x_space, -5, y_silhouette, color="#060c14", zorder=100)
-        
-        # Clean up gridline decorations and formatting
-        ax.grid(True, color=grid_color, alpha=0.15, linestyle='--', zorder=2)
-        ax.set_xlabel("Azimuth (Degrees)", color="#ffffff")
-        ax.set_ylabel("Altitude (Degrees)", color="#ffffff")
-        ax.tick_params(colors='#ffffff')
-        
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-
-        # --- DISPLAY & DOWNLOAD ---
-        st.pyplot(fig)
-        
-        img_buf = io.BytesIO()
-        # Ensure saved file respects the calculated background canvas spectrum natively
-        fig.savefig(img_buf, format="png", bbox_inches='tight', dpi=150, facecolor=cmap_colors[-1])
-        img_buf.seek(0)
-        
-        st.download_button(
-            label="💾 Download High-Res PNG for Editing / On-Air",
-            data=img_buf,
-            file_name=f"custom_sky_{direction}.png",
-            mime="image/png"
-        )
+            'jupiter':
