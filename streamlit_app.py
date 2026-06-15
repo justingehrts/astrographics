@@ -162,9 +162,117 @@ if st.button("Generate Sky Graphic", type="primary"):
         )
         
         # 4. PLOT PLANETS & MOON
+        # FIXED: Removed the emoji wireframe fallback token from the Moon parameter string
         bodies = {
-            'moon': (eph['moon'], 180, '🌙 Moon'),
+            'moon': (eph['moon'], 180, 'Moon'),
             'mercury': (eph['mercury'], 40, 'Mercury'),
             'venus': (eph['venus'], 70, 'Venus'),
             'mars': (eph['mars'], 40, 'Mars'),
-            'jupiter':
+            'jupiter': (eph['jupiter_barycenter'], 90, 'Jupiter'),
+            'saturn': (eph['saturn_barycenter'], 60, 'Saturn')
+        }
+        
+        for name, (body, size, label) in bodies.items():
+            try:
+                astrometric = observer_loc.at(t).observe(body)
+                alt, az, _ = astrometric.apparent().altaz()
+                
+                body_az = az.degrees
+                body_alt = alt.degrees
+                
+                if direction == "North" and body_az < 90:
+                    body_az += 360
+                    
+                if az_min <= body_az <= az_max and 0 <= body_alt <= 40:
+                    color = "#ffffff" if name in ['moon', 'venus', 'jupiter'] else "#ff9999"
+                    ax.scatter(body_az, body_alt, s=size, color=color, zorder=50)
+                    
+                    if show_labels:
+                        ax.text(body_az + 0.6, body_alt + 0.6, label, color="#ffffff", fontsize=11, weight='bold', zorder=51)
+            except Exception:
+                continue
+
+        # 5. PLOT TRUE CALCULATED NAVIGATIONAL STARS
+        if sun_deg <= -6:
+            star_data = [
+                ("Polaris", 1.97, (2, 31, 49.1), (89, 15, 51)),
+                ("Vega", 0.03, (18, 36, 56.3), (38, 47, 1)),
+                ("Capella", 0.08, (5, 16, 41.4), (45, 59, 53)),
+                ("Arcturus", -0.05, (14, 15, 39.7), (19, 10, 57)),
+                ("Betelgeuse", 0.50, (5, 55, 10.3), (7, 24, 25)),
+                ("Procyon", 0.34, (7, 39, 18.1), (5, 13, 30)),
+                ("Pollux", 1.14, (7, 45, 18.9), (28, 1, 34)),
+                ("Castor", 1.58, (7, 34, 36.0), (31, 53, 18)),
+                ("Spica", 0.98, (13, 25, 11.6), (-11, 9, 41)),
+                ("Altair", 0.76, (19, 50, 47.0), (8, 52, 6)),
+                ("Deneb", 1.25, (20, 41, 25.9), (45, 16, 49)),
+                ("Regulus", 1.36, (10, 8, 22.3), (11, 58, 2))
+            ]
+            
+            for name, mag, ra_tuple, dec_tuple in star_data:
+                if mag <= star_brightness:
+                    try:
+                        star_obj = Star(ra_hours=ra_tuple, dec_degrees=dec_tuple)
+                        star_astrometric = observer_loc.at(t).observe(star_obj)
+                        s_alt, s_az, _ = star_astrometric.apparent().altaz()
+                        
+                        star_az = s_az.degrees
+                        star_alt = s_alt.degrees
+                        
+                        if direction == "North" and star_az < 90:
+                            star_az += 360
+                            
+                        if az_min <= star_az <= az_max and 0 <= star_alt <= 40:
+                            size = max(4, (5.0 - mag) * 6)
+                            ax.scatter(star_az, star_alt, s=size, color="#ffffff", alpha=0.8, zorder=20)
+                            if show_labels:
+                                ax.text(star_az + 0.5, star_alt + 0.5, name, color="#ffffff", fontsize=9, alpha=0.6, zorder=21)
+                    except Exception:
+                        continue
+
+        # 6. FIXED SUBURBAN TREE HORIZON SILHOUETTE
+        x_space = np.linspace(az_min, az_max, 400)
+        base_ground = 4.0 + 1.0 * np.sin(x_space / 5)
+        tree_canopy = 1.2 * np.sin(x_space * 2.5) * np.cos(x_space * 0.4)
+        fine_foliage = 0.5 * np.sin(x_space * 12.0)
+        y_silhouette = base_ground + tree_canopy + fine_foliage
+        y_silhouette = np.clip(y_silhouette, 2.0, 10.0)
+
+        # Draw tree canopy layer
+        ax.fill_between(x_space, -5, y_silhouette, color="#060c14", zorder=100)
+        
+        # Clean up gridline decorations and formatting
+        ax.grid(True, color=grid_color, alpha=0.15, linestyle='--', zorder=2)
+        ax.set_xlabel("Azimuth (Degrees)", color="#ffffff")
+        ax.set_ylabel("Altitude (Degrees)", color="#ffffff")
+        ax.tick_params(colors='#ffffff')
+        
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        # --- DISPLAY & DOWNLOAD ---
+        # 1. Render natively to the Streamlit dashboard web interface
+        st.pyplot(fig)
+        
+        # 2. Extract raw binary streams from the active plot object
+        img_buf = io.BytesIO()
+        
+        # FIXED: Forces the figure canvas background to transparent and overrides tight bbox clip calculations.
+        # This locks the dynamic gradient image edge-to-edge on your downloaded PNG.
+        fig.savefig(
+            img_buf, 
+            format="png", 
+            dpi=150, 
+            facecolor="none", 
+            edgecolor="none",
+            pad_inches=0.0
+        )
+        img_buf.seek(0)
+        
+        # 3. Trigger the browser downloader callback
+        st.download_button(
+            label="💾 Download High-Res PNG for Editing / On-Air",
+            data=img_buf,
+            file_name=f"custom_sky_{direction}.png",
+            mime="image/png"
+        )
