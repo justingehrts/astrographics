@@ -304,4 +304,3 @@ if st.button("Generate Sky Graphic", type="primary"):
             file_name=f"custom_sky_{direction}.png",
             mime="image/png"
         )
-st.
