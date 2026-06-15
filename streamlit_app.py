@@ -91,7 +91,7 @@ az_min, az_max = az_map[direction]
 
 # --- GRAPHIC GENERATION LOGIC ---
 if st.button("Generate Sky Graphic", type="primary"):
-    with st.spinner("Computing high-fidelity sky model and celestial structures..."):
+    with st.spinner("Computing high-fidelity directional sky model and celestial structures..."):
         
         # Combine inputs into a localized datetime object
         dt_local = datetime.combine(obs_date, obs_time, tzinfo=ZoneInfo(selected_tz))
@@ -109,82 +109,111 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_astrometric = observer_loc.at(t).observe(sun)
         sun_alt, sun_az, _ = sun_astrometric.apparent().altaz()
         sun_deg = sun_alt.degrees
+        sun_az_deg = sun_az.degrees
         
-        # 1. ATMOSPHERIC GRADIENT CALCULATOR
-        if sun_deg > 0:
-            # Daytime sky blend model
-            top_rgb = np.array([26, 102, 255]) / 255.0
-            horizon_rgb = np.array([153, 204, 255]) / 255.0
-            grid_color = "#ffffff"
-            cmap_colors = [horizon_rgb, top_rgb]
-        else:
-            # Twilight & Night continuous equation mapping based on solar dip angles
-            solar_dip = np.clip(abs(sun_deg), 0, 18)
-            
-            # Continuous factor mappings for top and base sky components
-            t_factor = np.clip((solar_dip / 12.0), 0, 1)
-            h_factor = np.clip((solar_dip / 8.0), 0, 1)
-            
-            top_dusk = np.array([15, 23, 42]) / 255.0
-            top_night = np.array([11, 17, 32]) / 255.0
-            top_rgb = top_dusk * (1.0 - t_factor) + top_night * t_factor
-            
-            horiz_twilight = np.array([212, 138, 59]) / 255.0  
-            horiz_night = np.array([22, 34, 56]) / 255.0       
-            horizon_rgb = horiz_twilight * (1.0 - h_factor) + horiz_night * h_factor
-            
-            if solar_dip < 6.0:
-                mid_factor = solar_dip / 6.0
-                mid_twilight = np.array([59, 45, 84]) / 255.0  
-                mid_rgb = mid_twilight * (1.0 - mid_factor) + horiz_night * mid_factor
-                cmap_colors = [horizon_rgb, mid_rgb, top_rgb]
-                grid_color = "#475569"
-            else:
-                cmap_colors = [horizon_rgb, top_rgb]
-                grid_color = "#334155"
-
         # 2. INITIALIZE MATPLOTLIB CANVAS
         fig, ax = plt.subplots(figsize=(12, 6.75))
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
-        # 3. RENDER THE ATMOSPHERIC COLOR GRADIENT BACKGROUND
-        cmap = LinearSegmentedColormap.from_list("sky_gradient", cmap_colors)
-        gradient_matrix = np.linspace(0, 1, 256).reshape(-1, 1)
+        # 3. HIGH-FIDELITY 2D DIRECTIONAL ATMOSPHERIC MESH ENGINE
+        # Build a high-resolution 2D spatial pixel grid for the background matrix
+        x_pixels, y_pixels = 150, 100
+        x_space = np.linspace(az_min, az_max, x_pixels)
+        y_space = np.linspace(0, 40, y_pixels)
+        X_mesh, Y_mesh = np.meshgrid(x_space, y_space)
         
+        if sun_deg > 0:
+            # Daytime Sky: Simple, rich Rayleigh atmospheric blue
+            grid_color = "#ffffff"
+            bg_image = np.zeros((y_pixels, x_pixels, 3))
+            top_rgb = np.array([26, 102, 255]) / 255.0
+            horiz_rgb = np.array([153, 204, 255]) / 255.0
+            for y in range(y_pixels):
+                frac = y / float(y_pixels)
+                bg_image[y, :, :] = horiz_rgb * (1.0 - frac) + top_rgb * frac
+        else:
+            # Twilight & Night: Compute local horizontal light scattering angles
+            solar_dip = np.clip(abs(sun_deg), 0, 18)
+            
+            # Base color vectors
+            top_dusk = np.array([15, 23, 42]) / 255.0
+            top_night = np.array([11, 17, 32]) / 255.0
+            horiz_twilight = np.array([212, 138, 59]) / 255.0  # Warm twilight amber
+            horiz_night = np.array([22, 34, 56]) / 255.0       # Midnight slate
+            mid_twilight = np.array([59, 45, 84]) / 255.0      # Atmospheric plum
+            
+            # Continuous vertical decay factors
+            t_factor = np.clip((solar_dip / 12.0), 0, 1)
+            base_top_rgb = top_dusk * (1.0 - t_factor) + top_night * t_factor
+            grid_color = "#475569" if solar_dip < 6.0 else "#334155"
+            
+            # Initialize empty RGB image array
+            bg_image = np.zeros((y_pixels, x_pixels, 3))
+            
+            # Compute pixel-by-pixel scattering vectors
+            for y_idx in range(y_pixels):
+                alt_val = y_space[y_idx]
+                v_frac = alt_val / 40.0  # Vertical position factor
+                
+                for x_idx in range(x_pixels):
+                    az_val = x_space[x_idx]
+                    
+                    # Normalize azimuth wrap-around differences
+                    az_diff = abs((az_val % 360) - (sun_az_deg % 360))
+                    if az_diff > 180:
+                        az_diff = 360 - az_diff
+                        
+                    # Horizontal scatter factor: Fades exponentially moving away from the sun's heading
+                    h_scatter = np.exp(-(az_diff / 45.0)**2)
+                    
+                    # Compute dynamic, localized twilight intensity at this specific coordinate
+                    effective_dip = solar_dip + (az_diff / 10.0)
+                    effective_dip = np.clip(effective_dip, 0, 18)
+                    
+                    # Smoothly blend horizon colors using horizontal scattering parameters
+                    h_factor = np.clip((effective_dip / 8.0), 0, 1)
+                    local_horiz_rgb = horiz_twilight * (1.0 - h_factor) * h_scatter + horiz_night * (1.0 - (1.0 - h_factor) * h_scatter)
+                    
+                    # Compile vertical gradient layers
+                    if effective_dip < 6.0:
+                        m_factor = effective_dip / 6.0
+                        local_mid_rgb = mid_twilight * (1.0 - m_factor) * h_scatter + horiz_night * (1.0 - (1.0 - m_factor) * h_scatter)
+                        
+                        if v_frac < 0.35:
+                            # Horizon to mid-sky blend
+                            pixel_rgb = local_horiz_rgb * (1.0 - (v_frac / 0.35)) + local_mid_rgb * (v_frac / 0.35)
+                        else:
+                            # Mid-sky to upper void blend
+                            p_frac = (v_frac - 0.35) / 0.65
+                            pixel_rgb = local_mid_rgb * (1.0 - p_frac) + base_top_rgb * p_frac
+                    else:
+                        pixel_rgb = local_horiz_rgb * (1.0 - v_frac) + base_top_rgb * v_frac
+                        
+                    bg_image[y_idx, x_idx, :] = np.clip(pixel_rgb, 0, 1)
+
+        # Draw the computed 2D analytical gradient into the graph canvas layer
         ax.imshow(
-            gradient_matrix,
-            extent=[az_min, az_max, 0, 40], 
-            cmap=cmap,
+            bg_image,
+            extent=[az_min, az_max, 0, 40],
             origin="lower",
             aspect="auto",
-            zorder=0                        
+            zorder=0
         )
         
-        # --- FIXED ENGINE: URBAN SKY GLOW DOME IMAGE OVERLAY ---
+        # --- ENGINE: URBAN SKY GLOW DOME IMAGE OVERLAY ---
         if star_brightness <= 1.5 and sun_deg <= 0:
-            x_pixels = 200
-            y_pixels = 100
-            x_grid = np.linspace(az_min, az_max, x_pixels)
-            y_grid = np.linspace(0, 40, y_pixels)
-            X_m, Y_m = np.meshgrid(x_grid, y_grid)
+            x_glow, y_glow = 200, 100
+            x_g_space = np.linspace(az_min, az_max, x_glow)
+            y_g_space = np.linspace(0, 40, y_glow)
+            X_m, Y_m = np.meshgrid(x_g_space, y_g_space)
             
             center_az = (az_min + az_max) / 2.0
-            
-            # Mathematical 2D Gaussian curve defining the light dome boundaries
             gaussian_glow = np.exp(-((X_m - center_az) / 24.0)**2 - (Y_m / 14.0)**2)
-            
-            # Independent, vivid sodium/LED color profiles that pierce true midnight dark parameters
-            # 1.0 (Heavy City) uses a rich golden-amber; 1.5 (Urban) gets a slightly softer copper tone
             glow_base_color = "#e2964d" if star_brightness == 1.0 else "#c97e3a"
             
-            # Construct a dedicated RGBA pixel array to force clean, unclipped alpha transitions
-            rgba_glow = np.zeros((y_pixels, x_pixels, 4))
-            rgb_target = np.array(matplotlib.colors.to_rgb(glow_base_color))
-            
-            rgba_glow[..., :3] = rgb_target
-            
-            # Fixed opacity curve capping the light dome center cleanly at 32% visibility
+            rgba_glow = np.zeros((y_glow, x_glow, 4))
+            rgba_glow[..., :3] = matplotlib.colors.to_rgb(glow_base_color)
             rgba_glow[..., 3] = gaussian_glow * 0.32  
             
             ax.imshow(
@@ -192,7 +221,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                 extent=[az_min, az_max, 0, 40],
                 origin="lower",
                 aspect="auto",
-                zorder=1,    # Anchored right in front of the sky mesh, behind the tree silhouettes
+                zorder=1,
                 interpolation="bilinear"
             )
 
@@ -228,85 +257,4 @@ if st.button("Generate Sky Graphic", type="primary"):
 
         # 5. PLOT TRUE CALCULATED NAVIGATIONAL STARS
         if sun_deg <= -6:
-            star_data = [
-                ("Polaris", 1.97, (2, 31, 49.1), (89, 15, 51)),
-                ("Vega", 0.03, (18, 36, 56.3), (38, 47, 1)),
-                ("Capella", 0.08, (5, 16, 41.4), (45, 59, 53)),
-                ("Arcturus", -0.05, (14, 15, 39.7), (19, 10, 57)),
-                ("Betelgeuse", 0.50, (5, 55, 10.3), (7, 24, 25)),
-                ("Procyon", 0.34, (7, 39, 18.1), (5, 13, 30)),
-                ("Pollux", 1.14, (7, 45, 18.9), (28, 1, 34)),
-                ("Castor", 1.58, (7, 34, 36.0), (31, 53, 18)),
-                ("Spica", 0.98, (13, 25, 11.6), (-11, 9, 41)),
-                ("Altair", 0.76, (19, 50, 47.0), (8, 52, 6)),
-                ("Deneb", 1.25, (20, 41, 25.9), (45, 16, 49)),
-                ("Regulus", 1.36, (10, 8, 22.3), (11, 58, 2))
-            ]
-            
-            for name, mag, ra_tuple, dec_tuple in star_data:
-                if mag <= star_brightness:
-                    try:
-                        star_obj = Star(ra_hours=ra_tuple, dec_degrees=dec_tuple)
-                        star_astrometric = observer_loc.at(t).observe(star_obj)
-                        s_alt, s_az, _ = star_astrometric.apparent().altaz()
-                        
-                        star_az = s_az.degrees
-                        star_alt = s_alt.degrees
-                        
-                        if direction == "North" and star_az < 90:
-                            star_az += 360
-                            
-                        if az_min <= star_az <= az_max and 0 <= star_alt <= 40:
-                            size = max(4, (5.0 - mag) * 6)
-                            ax.scatter(star_az, star_alt, s=size, color="#ffffff", alpha=0.8, zorder=20)
-                            if show_labels:
-                                ax.text(star_az + 0.5, star_alt + 0.5, name, color="#ffffff", fontsize=9, alpha=0.6, zorder=21)
-                    except Exception:
-                        continue
-
-        # 6. FIXED SUBURBAN TREE HORIZON SILHOUETTE
-        x_space = np.linspace(az_min, az_max, 400)
-        base_ground = 4.0 + 1.0 * np.sin(x_space / 5)
-        tree_canopy = 1.2 * np.sin(x_space * 2.5) * np.cos(x_space * 0.4)
-        fine_foliage = 0.5 * np.sin(x_space * 12.0)
-        y_silhouette = base_ground + tree_canopy + fine_foliage
-        y_silhouette = np.clip(y_silhouette, 2.0, 10.0)
-
-        # Draw tree canopy layer over the top of the urban light dome
-        ax.fill_between(x_space, -5, y_silhouette, color="#060c14", zorder=100)
-        
-        # Clean up gridline decorations and formatting
-        ax.grid(True, color=grid_color, alpha=0.15, linestyle='--', zorder=2)
-        ax.set_xlabel("Azimuth (Degrees)", color="#ffffff")
-        ax.set_ylabel("Altitude (Degrees)", color="#ffffff")
-        ax.tick_params(colors='#ffffff')
-        
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-
-# --- DISPLAY & DOWNLOAD ---
-        # 1. Render natively to the Streamlit dashboard web interface
-        st.pyplot(fig)
-        
-        # 2. Extract raw binary streams from the active plot object
-        img_buf = io.BytesIO()
-        
-        # Forces the figure canvas background to transparent and overrides tight bbox clip calculations.
-        # This locks the dynamic gradient image edge-to-edge on your downloaded PNG.
-        fig.savefig(
-            img_buf, 
-            format="png", 
-            dpi=150, 
-            facecolor="none", 
-            edgecolor="none",
-            pad_inches=0.0
-        )
-        img_buf.seek(0)
-        
-        # 3. Trigger the browser downloader callback
-        st.download_button(
-            label="💾 Download High-Res PNG for Editing / On-Air",
-            data=img_buf,
-            file_name=f"custom_sky_{direction}.png",
-            mime="image/png"
-        )
+            star_data =
