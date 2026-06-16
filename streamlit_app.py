@@ -113,13 +113,30 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_deg = sun_alt.degrees
         sun_az_deg = sun_az.degrees
         
+        # --- TROUBLESHOOTING SIDEBAR READOUT ---
+        # Natively tracks the true geometric altitude/azimuth calculation values
+        try:
+            moon_diag = eph['moon']
+            moon_ast = observer_loc.at(t).observe(moon_diag)
+            m_alt, m_az, _ = moon_ast.apparent().altaz()
+            
+            merc_diag = eph['mercury']
+            merc_ast = observer_loc.at(t).observe(merc_diag)
+            me_alt, me_az, _ = merc_ast.apparent().altaz()
+            
+            st.sidebar.markdown("### 🔍 Raw Math Coordinates")
+            st.sidebar.code(
+                f"SUN:   Alt {sun_deg:.3f}° | Az {sun_az_deg:.3f}°\n"
+                f"MOON:  Alt {m_alt.degrees:.3f}° | Az {m_az.degrees:.3f}°\n"
+                f"MERC:  Alt {me_alt.degrees:.3f}° | Az {me_az.degrees:.3f}°"
+            )
+        except Exception as e:
+            st.sidebar.error(f"Diagnostic failed: {str(e)}")
+            
         # 2. INITIALIZE MATPLOTLIB CANVAS
         fig, ax = plt.subplots(figsize=(12, 6.75))
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
-        
-        # FORCE FIXED 5-DEGREE SPACING WITH LABELS
-        ax.set_yticks(np.arange(0, 41, 10))
         
         # 3. HIGH-FIDELITY SPHERICAL SCATTERING 2D ATMOSPHERIC ENGINE
         x_pixels, y_pixels = 150, 100
@@ -269,7 +286,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                     body_az += 360
                     
                 if az_min <= body_az <= az_max and 0 <= body_alt <= 40:
-                    # FIXED: Shifted all planets strictly to pure crisp white (#ffffff)
+                    # All planets render strictly pure white
                     ax.scatter(body_az, body_alt, s=size, color="#ffffff", zorder=50)
                     
                     if show_labels:
@@ -386,12 +403,11 @@ if st.button("Generate Sky Graphic", type="primary"):
 
         ax.fill_between(x_silhouette_space, -5, y_silhouette, color="#060c14", zorder=100)
         
-# Clean up gridline decorations and formatting
+        # Clean up gridline decorations and formatting
         ax.grid(True, color=grid_color, alpha=0.15, linestyle='--', zorder=2)
         
-        # Lock in explicit integer tick locations for your 10-degree increments
+        # LOCKED FIXED 10-DEGREE SPACING WITH CRISP LABELS
         ax.set_yticks(np.arange(0, 41, 10))
-        # Format with the degree symbol for crisp on-air production value
         ax.set_yticklabels([f"{int(y)}°" for y in np.arange(0, 41, 10)])
         
         ax.set_xlabel("Azimuth (Degrees)", color="#ffffff")
