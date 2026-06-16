@@ -225,7 +225,10 @@ if st.button("Generate Sky Graphic", type="primary"):
                     pixel_rgb = day_sky_block
                 elif sun_deg > -12.0:
                     raw_factor = np.clip((sun_deg - (-12.0)) / 14.0, 0, 1)
-                    transition_factor = np.power(raw_factor, 1.8)
+                    
+                    # FIXED: Dropped the power exponent from 1.8 down to 1.1 
+                    # This allows a much more realistic, linear, and slower decay of twilight horizon light
+                    transition_factor = np.power(raw_factor, 1.1)
                     pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
                 else:
                     pixel_rgb = night_sky_block
