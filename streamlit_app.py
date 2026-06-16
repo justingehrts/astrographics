@@ -116,77 +116,69 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
-        # 3. HIGH-FIDELITY 2D DIRECTIONAL ATMOSPHERIC MESH ENGINE
+        # 3. HIGH-FIDELITY UNIFIED 2D DIRECTIONAL ATMOSPHERIC MESH ENGINE
         x_pixels, y_pixels = 150, 100
         x_space = np.linspace(az_min, az_max, x_pixels)
         y_space = np.linspace(0, 40, y_pixels)
         X_mesh, Y_mesh = np.meshgrid(x_space, y_space)
         
-        # FIXED: Extended the daylight/early twilight window to sun_deg > -2.0.
-        # This keeps the sky bright, vivid, and realistic up through 15-20 minutes post-sunset.
-        if sun_deg > -2.0:
-            grid_color = "#ffffff"
-            bg_image = np.zeros((y_pixels, x_pixels, 3))
+        # Track continuous shift parameters from daylight down to full midnight dark limits
+        # A positive sun value scales down toward 0, a negative value tracks the dip depth
+        solar_dip = np.clip(abs(sun_deg), 0, 18) if sun_deg <= 0 else 0.0
+        day_intensity = np.clip(sun_deg / 15.0, 0, 1) if sun_deg > 0 else 0.0
+        
+        # Anchor color profiles
+        top_day = np.array([26, 102, 255]) / 255.0
+        horiz_day = np.array([153, 204, 255]) / 255.0
+        
+        top_dusk = np.array([15, 23, 42]) / 255.0
+        top_night = np.array([11, 17, 32]) / 255.0
+        horiz_twilight = np.array([212, 138, 59]) / 255.0  # Luminous sunset orange-gold
+        horiz_night = np.array([22, 34, 56]) / 255.0       # Higher contrast midnight slate blue
+        mid_twilight = np.array([59, 45, 84]) / 255.0      # Atmospheric plum scattering
+        
+        # Compute base upper sky value
+        t_factor = np.clip((solar_dip / 12.0), 0, 1)
+        base_top_rgb = top_day * day_intensity + (1.0 - day_intensity) * (top_dusk * (1.0 - t_factor) + top_night * t_factor)
+        grid_color = "#ffffff" if sun_deg > 0 else ("#475569" if solar_dip < 6.0 else "#334155")
+        
+        # Vectorized calculation of horizontal azimuth offsets across the frame
+        rad_diff = np.radians(X_mesh - sun_az_deg)
+        h_scatter = np.exp(-((1.0 - np.cos(rad_diff)) * (180.0 / np.pi) / 85.0)**2)
+        
+        # Adjust effective solar dip continuously across the 2D coordinates based on view window headings
+        effective_dip = solar_dip + (1.0 - h_scatter) * 5.0
+        effective_dip = np.clip(effective_dip, 0, 18)
+        
+        bg_image = np.zeros((y_pixels, x_pixels, 3))
+        
+        for y_idx in range(y_pixels):
+            v_frac = y_space[y_idx] / 40.0  
             
-            # Linear scaling to gradually transition from full daylight blue to deep golden dusk
-            day_progress = np.clip((sun_deg + 2.0) / 4.0, 0, 1) # 1.0 at noon, 0.0 at mid civil twilight
-            
-            top_rgb = day_progress * (np.array([26, 102, 255]) / 255.0) + (1.0 - day_progress) * (np.array([24, 38, 68]) / 255.0)
-            horiz_rgb = day_progress * (np.array([153, 204, 255]) / 255.0) + (1.0 - day_progress) * (np.array([232, 155, 74]) / 255.0)
-            
-            for y in range(y_pixels):
-                frac = y / float(y_pixels)
-                bg_image[y, :, :] = horiz_rgb * (1.0 - frac) + top_rgb * frac
-        else:
-            # Twilight & Night: Compute dynamic light scattering paths based on look direction
-            solar_dip = np.clip(abs(sun_deg), 0, 18)
-            
-            # Anchor color profiles
-            top_dusk = np.array([15, 23, 42]) / 255.0
-            top_night = np.array([11, 17, 32]) / 255.0
-            horiz_twilight = np.array([212, 138, 59]) / 255.0  
-            horiz_night = np.array([22, 34, 56]) / 255.0       
-            mid_twilight = np.array([59, 45, 84]) / 255.0      
-            
-            t_factor = np.clip((solar_dip / 12.0), 0, 1)
-            base_top_rgb = top_dusk * (1.0 - t_factor) + top_night * t_factor
-            grid_color = "#475569" if solar_dip < 6.0 else "#334155"
-            
-            bg_image = np.zeros((y_pixels, x_pixels, 3))
-            
-            rad_diff = np.radians(X_mesh - sun_az_deg)
-            h_scatter = np.exp(-((1.0 - np.cos(rad_diff)) * (180.0 / np.pi) / 85.0)**2)
-            
-            # FIXED: Lowered the azimuth penalty scalar from 8.0 down to 4.0.
-            # This allows ambient sky light to wrap much more naturally into the eastern view.
-            effective_dip = solar_dip + (1.0 - h_scatter) * 4.0
-            effective_dip = np.clip(effective_dip, 0, 18)
-            
-            for y_idx in range(y_pixels):
-                v_frac = y_space[y_idx] / 40.0  
+            for x_idx in range(x_pixels):
+                e_dip = effective_dip[y_idx, x_idx]
+                scat = h_scatter[y_idx, x_idx]
                 
-                for x_idx in range(x_pixels):
-                    e_dip = effective_dip[y_idx, x_idx]
-                    scat = h_scatter[y_idx, x_idx]
+                # Dynamic blend factor for the horizon color array
+                h_factor = np.clip((e_dip / 8.0), 0, 1)
+                twilight_horiz = horiz_twilight * (1.0 - h_factor) * scat + horiz_night * (1.0 - (1.0 - h_factor) * scat)
+                local_horiz_rgb = horiz_day * day_intensity + (1.0 - day_intensity) * twilight_horiz
+                
+                if sun_deg <= 0 and e_dip < 6.0:
+                    m_factor = e_dip / 6.0
+                    local_mid_rgb = mid_twilight * (1.0 - m_factor) * scat + horiz_night * (1.0 - (1.0 - m_factor) * scat)
                     
-                    h_factor = np.clip((e_dip / 8.0), 0, 1)
-                    local_horiz_rgb = horiz_twilight * (1.0 - h_factor) * scat + horiz_night * (1.0 - (1.0 - h_factor) * scat)
-                    
-                    if e_dip < 6.0:
-                        m_factor = e_dip / 6.0
-                        local_mid_rgb = mid_twilight * (1.0 - m_factor) * scat + horiz_night * (1.0 - (1.0 - m_factor) * scat)
-                        
-                        if v_frac < 0.55:
-                            pixel_rgb = local_horiz_rgb * (1.0 - (v_frac / 0.55)) + local_mid_rgb * (v_frac / 0.55)
-                        else:
-                            p_frac = (v_frac - 0.55) / 0.45
-                            pixel_rgb = local_mid_rgb * (1.0 - p_frac) + base_top_rgb * p_frac
+                    if v_frac < 0.55:
+                        pixel_rgb = local_horiz_rgb * (1.0 - (v_frac / 0.55)) + local_mid_rgb * (v_frac / 0.55)
                     else:
-                        pixel_rgb = local_horiz_rgb * (1.0 - v_frac) + base_top_rgb * v_frac
-                        
-                    bg_image[y_idx, x_idx, :] = np.clip(pixel_rgb, 0, 1)
+                        p_frac = (v_frac - 0.55) / 0.45
+                        pixel_rgb = local_mid_rgb * (1.0 - p_frac) + base_top_rgb * p_frac
+                else:
+                    pixel_rgb = local_horiz_rgb * (1.0 - v_frac) + base_top_rgb * v_frac
+                    
+                bg_image[y_idx, x_idx, :] = np.clip(pixel_rgb, 0, 1)
 
-        # Draw the calculated 2D analytical gradient mesh onto the background plane
+        # Draw the calculated continuous 2D analytical gradient mesh onto the background plane
         ax.imshow(
             bg_image,
             extent=[az_min, az_max, 0, 40],
