@@ -116,65 +116,79 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
-        # 3. HIGH-FIDELITY UNIFIED 2D DIRECTIONAL ATMOSPHERIC MESH ENGINE
+        # 3. HIGH-FIDELITY SPHERICAL SCATTERING 2D ATMOSPHERIC ENGINE
         x_pixels, y_pixels = 150, 100
         x_space = np.linspace(az_min, az_max, x_pixels)
         y_space = np.linspace(0, 40, y_pixels)
         X_mesh, Y_mesh = np.meshgrid(x_space, y_space)
         
-        # Track continuous shift parameters from daylight down to full midnight dark limits
-        # A positive sun value scales down toward 0, a negative value tracks the dip depth
-        solar_dip = np.clip(abs(sun_deg), 0, 18) if sun_deg <= 0 else 0.0
-        day_intensity = np.clip(sun_deg / 15.0, 0, 1) if sun_deg > 0 else 0.0
+        # Convert coordinate angles to true radians for 3D vector space mapping
+        rad_az_mesh = np.radians(X_mesh)
+        rad_alt_mesh = np.radians(Y_mesh)
+        rad_sun_az = np.radians(sun_az_deg)
+        rad_sun_alt = np.radians(sun_deg)
         
-        # Anchor color profiles
-        top_day = np.array([26, 102, 255]) / 255.0
-        horiz_day = np.array([153, 204, 255]) / 255.0
+        # Compute exact angular scattering separation matrix across the canvas grid
+        cos_scatter_angle = (np.sin(rad_alt_mesh) * np.sin(rad_sun_alt) + 
+                             np.cos(rad_alt_mesh) * np.cos(rad_sun_alt) * np.cos(rad_az_mesh - rad_sun_az))
+        scatter_angle_deg = np.degrees(np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0)))
         
-        top_dusk = np.array([15, 23, 42]) / 255.0
-        top_night = np.array([11, 17, 32]) / 255.0
-        horiz_twilight = np.array([212, 138, 59]) / 255.0  # Luminous sunset orange-gold
-        horiz_night = np.array([22, 34, 56]) / 255.0       # Higher contrast midnight slate blue
-        mid_twilight = np.array([59, 45, 84]) / 255.0      # Atmospheric plum scattering
+        # Define high-fidelity atmospheric color profiles
+        color_day_top = np.array([26, 102, 255]) / 255.0      # Rich scattered Rayleigh blue
+        color_day_horiz = np.array([153, 204, 255]) / 255.0    # Bright sunlit white-blue
+        color_twilight_horiz = np.array([212, 138, 59]) / 255.0 # Vivid sunset amber gold
+        color_twilight_mid = np.array([59, 45, 84]) / 255.0    # Twilight purple / Belt of Venus plum
+        color_night_top = np.array([11, 17, 32]) / 255.0       # Midnight cosmic sky navy
+        color_night_horiz = np.array([22, 34, 56]) / 255.0     # Deep twilight slate anchor
         
-        # Compute base upper sky value
-        t_factor = np.clip((solar_dip / 12.0), 0, 1)
-        base_top_rgb = top_day * day_intensity + (1.0 - day_intensity) * (top_dusk * (1.0 - t_factor) + top_night * t_factor)
-        grid_color = "#ffffff" if sun_deg > 0 else ("#475569" if solar_dip < 6.0 else "#334155")
+        # Dynamically set grid visibility parameters based on solar presence
+        grid_color = "#ffffff" if sun_deg > 0 else ("#475569" if sun_deg > -6.0 else "#334155")
         
-        # Vectorized calculation of horizontal azimuth offsets across the frame
-        rad_diff = np.radians(X_mesh - sun_az_deg)
-        h_scatter = np.exp(-((1.0 - np.cos(rad_diff)) * (180.0 / np.pi) / 85.0)**2)
-        
-        # Adjust effective solar dip continuously across the 2D coordinates based on view window headings
-        effective_dip = solar_dip + (1.0 - h_scatter) * 5.0
-        effective_dip = np.clip(effective_dip, 0, 18)
-        
+        # Initialize structural RGB float matrix array
         bg_image = np.zeros((y_pixels, x_pixels, 3))
         
+        # Vectorized generation of the sky color field using localized scatter metrics
         for y_idx in range(y_pixels):
-            v_frac = y_space[y_idx] / 40.0  
+            alt_val = y_space[y_idx]
+            v_frac = alt_val / 40.0  # Vertical frame height percentage
             
             for x_idx in range(x_pixels):
-                e_dip = effective_dip[y_idx, x_idx]
-                scat = h_scatter[y_idx, x_idx]
+                theta = scatter_angle_deg[y_idx, x_idx]
                 
-                # Dynamic blend factor for the horizon color array
-                h_factor = np.clip((e_dip / 8.0), 0, 1)
-                twilight_horiz = horiz_twilight * (1.0 - h_factor) * scat + horiz_night * (1.0 - (1.0 - h_factor) * scat)
-                local_horiz_rgb = horiz_day * day_intensity + (1.0 - day_intensity) * twilight_horiz
+                # Calculate localized brightness scalars based on angular proximity to the sun vector
+                # Forward scatter controls sunset intensity; backward scatter handles the anti-solar dark dome
+                f_scatter = np.exp(-(theta / 55.0)**2)
+                b_scatter = np.exp(-((180.0 - theta) / 90.0)**2)
                 
-                if sun_deg <= 0 and e_dip < 6.0:
-                    m_factor = e_dip / 6.0
-                    local_mid_rgb = mid_twilight * (1.0 - m_factor) * scat + horiz_night * (1.0 - (1.0 - m_factor) * scat)
-                    
+                # Base daylight profile mapping
+                day_horiz = color_day_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter)
+                day_sky_block = day_horiz * (1.0 - v_frac) + color_day_top * v_frac
+                
+                # Base nighttime profile mapping
+                night_horiz = color_twilight_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter)
+                
+                if theta < 70.0:
+                    # Inside the primary sunset arc: blend smoothly from horizon gold through plum to the upper sky
                     if v_frac < 0.55:
-                        pixel_rgb = local_horiz_rgb * (1.0 - (v_frac / 0.55)) + local_mid_rgb * (v_frac / 0.55)
+                        h_blend = v_frac / 0.55
+                        night_sky_block = night_horiz * (1.0 - h_blend) + color_twilight_mid * h_blend
                     else:
-                        p_frac = (v_frac - 0.55) / 0.45
-                        pixel_rgb = local_mid_rgb * (1.0 - p_frac) + base_top_rgb * p_frac
+                        t_blend = (v_frac - 0.55) / 0.45
+                        night_sky_block = color_twilight_mid * (1.0 - t_blend) + color_night_top * t_blend
                 else:
-                    pixel_rgb = local_horiz_rgb * (1.0 - v_frac) + base_top_rgb * v_frac
+                    # Antisolar arc: cross-fade smoothly into midnight blue properties
+                    night_sky_block = night_horiz * (1.0 - v_frac) + color_night_top * v_frac
+                
+                # Unify day and night cycles into a single, continuous transition path
+                # Uses a smooth sigmoidal curves from +2.0° down to -12.0° to eliminate all step jumps
+                if sun_deg > 2.0:
+                    pixel_rgb = day_sky_block
+                elif sun_deg > -12.0:
+                    # Interpolate between day parameters and twilight parameters smoothly
+                    transition_factor = np.clip((sun_deg - (-12.0)) / 14.0, 0, 1)
+                    pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
+                else:
+                    pixel_rgb = night_sky_block
                     
                 bg_image[y_idx, x_idx, :] = np.clip(pixel_rgb, 0, 1)
 
