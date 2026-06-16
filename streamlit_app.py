@@ -135,7 +135,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             # Twilight & Night: Compute dynamic light scattering paths based on look direction
             solar_dip = np.clip(abs(sun_deg), 0, 18)
             
-            # Base color profiles
+            # Anchor color profiles
             top_dusk = np.array([15, 23, 42]) / 255.0
             top_night = np.array([11, 17, 32]) / 255.0
             horiz_twilight = np.array([212, 138, 59]) / 255.0  
@@ -148,35 +148,34 @@ if st.button("Generate Sky Graphic", type="primary"):
             
             bg_image = np.zeros((y_pixels, x_pixels, 3))
             
+            # Vectorized calculation of horizontal azimuth offsets across the frame
+            # Broadened denominator from 45.0 to 85.0 to allow glow to fill more width natively
+            rad_diff = np.radians(X_mesh - sun_az_deg)
+            h_scatter = np.exp(-((1.0 - np.cos(rad_diff)) * (180.0 / np.pi) / 85.0)**2)
+            
+            # Softened the dip progression scalar to let illumination linger higher and longer
+            effective_dip = solar_dip + (1.0 - h_scatter) * 8.0
+            effective_dip = np.clip(effective_dip, 0, 18)
+            
             for y_idx in range(y_pixels):
-                alt_val = y_space[y_idx]
-                v_frac = alt_val / 40.0  
+                v_frac = y_space[y_idx] / 40.0  
                 
                 for x_idx in range(x_pixels):
-                    az_val = x_space[x_idx]
+                    e_dip = effective_dip[y_idx, x_idx]
+                    scat = h_scatter[y_idx, x_idx]
                     
-                    # Normalize azimuth differences across the 360 degree boundary
-                    az_diff = abs((az_val % 360) - (sun_az_deg % 360))
-                    if az_diff > 180:
-                        az_diff = 360 - az_diff
+                    h_factor = np.clip((e_dip / 8.0), 0, 1)
+                    local_horiz_rgb = horiz_twilight * (1.0 - h_factor) * scat + horiz_night * (1.0 - (1.0 - h_factor) * scat)
+                    
+                    if e_dip < 6.0:
+                        m_factor = e_dip / 6.0
+                        local_mid_rgb = mid_twilight * (1.0 - m_factor) * scat + horiz_night * (1.0 - (1.0 - m_factor) * scat)
                         
-                    # Horizontal scatter math: drops off smoothly the further away you look from the sunset
-                    h_scatter = np.exp(-(az_diff / 45.0)**2)
-                    
-                    effective_dip = solar_dip + (az_diff / 10.0)
-                    effective_dip = np.clip(effective_dip, 0, 18)
-                    
-                    h_factor = np.clip((effective_dip / 8.0), 0, 1)
-                    local_horiz_rgb = horiz_twilight * (1.0 - h_factor) * h_scatter + horiz_night * (1.0 - (1.0 - h_factor) * h_scatter)
-                    
-                    if effective_dip < 6.0:
-                        m_factor = effective_dip / 6.0
-                        local_mid_rgb = mid_twilight * (1.0 - m_factor) * h_scatter + horiz_night * (1.0 - (1.0 - m_factor) * h_scatter)
-                        
-                        if v_frac < 0.35:
-                            pixel_rgb = local_horiz_rgb * (1.0 - (v_frac / 0.35)) + local_mid_rgb * (v_frac / 0.35)
+                        # Pushed twilight ceiling from 35% up to 55% altitude to fill out frame height
+                        if v_frac < 0.55:
+                            pixel_rgb = local_horiz_rgb * (1.0 - (v_frac / 0.55)) + local_mid_rgb * (v_frac / 0.55)
                         else:
-                            p_frac = (v_frac - 0.35) / 0.65
+                            p_frac = (v_frac - 0.55) / 0.45
                             pixel_rgb = local_mid_rgb * (1.0 - p_frac) + base_top_rgb * p_frac
                     else:
                         pixel_rgb = local_horiz_rgb * (1.0 - v_frac) + base_top_rgb * v_frac
