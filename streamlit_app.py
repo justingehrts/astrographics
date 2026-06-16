@@ -386,8 +386,14 @@ if st.button("Generate Sky Graphic", type="primary"):
 
         ax.fill_between(x_silhouette_space, -5, y_silhouette, color="#060c14", zorder=100)
         
-        # Clean up gridline decorations and formatting
+# Clean up gridline decorations and formatting
         ax.grid(True, color=grid_color, alpha=0.15, linestyle='--', zorder=2)
+        
+        # Lock in explicit integer tick locations for your 10-degree increments
+        ax.set_yticks(np.arange(0, 41, 10))
+        # Format with the degree symbol for crisp on-air production value
+        ax.set_yticklabels([f"{int(y)}°" for y in np.arange(0, 41, 10)])
+        
         ax.set_xlabel("Azimuth (Degrees)", color="#ffffff")
         ax.set_ylabel("Altitude (Degrees)", color="#ffffff")
         ax.tick_params(colors='#ffffff')
