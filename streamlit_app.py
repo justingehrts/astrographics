@@ -167,7 +167,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         color_day_top = np.array([26, 102, 255]) / 255.0      
         color_day_horiz = np.array([153, 204, 255]) / 255.0    
         color_twilight_horiz = np.array([212, 138, 59]) / 255.0 
-        color_twilight_mid = np.array([45, 115, 138]) / 255.0     
+        # Boosted the green/blue channels slightly to inject more ambient luminance
+        color_twilight_mid = np.array([55, 135, 160]) / 255.0    
         color_night_top = np.array([11, 17, 32]) / 255.0       
         color_night_horiz = np.array([22, 34, 56]) / 255.0     
         
