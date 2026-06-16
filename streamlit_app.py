@@ -147,11 +147,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         color_day_top = np.array([26, 102, 255]) / 255.0      
         color_day_horiz = np.array([153, 204, 255]) / 255.0    
         color_twilight_horiz = np.array([212, 138, 59]) / 255.0 
-        
-        # FIXED: Adjusted mid-twilight profile to a luminous greenish-teal/cyan vector
-        # This models the soft mixing of golden horizon scatter and high-altitude daytime Rayleigh blue
         color_twilight_mid = np.array([45, 115, 138]) / 255.0     
-        
         color_night_top = np.array([11, 17, 32]) / 255.0       
         color_night_horiz = np.array([22, 34, 56]) / 255.0     
         
@@ -250,7 +246,6 @@ if st.button("Generate Sky Graphic", type="primary"):
             )
 
         # 4. PLOT PLANETS & DYNAMIC MOON ENGINE
-        # FIXED: Scaled down planet marker bounds for broadcast crispness
         bodies = {
             'mercury': (eph['mercury'], 16, 'Mercury'),  
             'venus': (eph['venus'], 35, 'Venus'),      
@@ -271,9 +266,8 @@ if st.button("Generate Sky Graphic", type="primary"):
                     body_az += 360
                     
                 if az_min <= body_az <= az_max and 0 <= body_alt <= 40:
-                    # FIXED: Mars gets native coral-red, Mercury and others get pure crisp white
-                    color = "#ff8866" if name == 'mars' else "#ffffff"
-                    ax.scatter(body_az, body_alt, s=size, color=color, zorder=50)
+                    # FIXED: Shifted all planets strictly to pure crisp white (#ffffff)
+                    ax.scatter(body_az, body_alt, s=size, color="#ffffff", zorder=50)
                     
                     if show_labels:
                         ax.text(body_az + 0.5, body_alt + 0.5, label, color="#ffffff", fontsize=10, weight='bold', zorder=51)
@@ -342,7 +336,6 @@ if st.button("Generate Sky Graphic", type="primary"):
             pass
 
         # 5. PLOT TRUE CALCULATED NAVIGATIONAL STARS
-        # FIXED: Scaled size down and added high-fidelity alpha values to prevent clutter
         if sun_deg <= -6:
             star_data = [
                 ("Polaris", 1.97, (2, 31, 49.1), (89, 15, 51)),
@@ -376,7 +369,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                             size = max(1.5, (5.0 - mag) * 2.5)
                             ax.scatter(star_az, star_alt, s=size, color="#ffffff", alpha=0.55, zorder=20)
                             if show_labels:
-                                ax.text(star_az + 0.4, star_alt + 0.4, name, color="#ffffff", fontsize=8, alpha=0.5, zorder=21)
+                                ax.text(star_az + 0.4, star_alt + 0.4, name, color="#ffffff", fontsize=9, alpha=0.5, zorder=21)
                     except Exception:
                         continue
 
