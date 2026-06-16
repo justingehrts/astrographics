@@ -133,11 +133,15 @@ if st.button("Generate Sky Graphic", type="primary"):
                              np.cos(rad_alt_mesh) * np.cos(rad_sun_alt) * np.cos(rad_az_mesh - rad_sun_az))
         scatter_angle_deg = np.degrees(np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0)))
         
+        # Track continuous shift parameters from daylight down to full midnight dark limits
+        solar_dip = np.clip(abs(sun_deg), 0, 18) if sun_deg <= 0 else 0.0
+        day_intensity = np.clip(sun_deg / 15.0, 0, 1) if sun_deg > 0 else 0.0
+        
         # Define high-fidelity atmospheric color profiles
         color_day_top = np.array([26, 102, 255]) / 255.0      
         color_day_horiz = np.array([153, 204, 255]) / 255.0    
         color_twilight_horiz = np.array([212, 138, 59]) / 255.0 
-        color_twilight_mid = np.array([72, 54, 94]) / 255.0     # Tuned slightly for cleaner Belt of Venus plum
+        color_twilight_mid = np.array([72, 54, 94]) / 255.0     
         color_night_top = np.array([11, 17, 32]) / 255.0       
         color_night_horiz = np.array([22, 34, 56]) / 255.0     
         
@@ -162,28 +166,37 @@ if st.button("Generate Sky Graphic", type="primary"):
                 day_horiz = color_day_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter)
                 day_sky_block = day_horiz * (1.0 - v_frac) + color_day_top * v_frac
                 
-                # Base nighttime profile mapping (Tuned backscatter to give the East a soft, realistic rise)
-                night_horiz = color_twilight_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter) + (color_twilight_mid * 0.4 * b_scatter)
+                # Dynamic blend factor for the horizon color array (Extended scale to -12° drop)
+                h_factor = np.clip(effective_dip / 12.0, 0, 1) if sun_deg <= 0 else 0.0
                 
-                # FIXED: Lowered the twilight ceiling boundary constraint from 0.55 down to 0.30
-                # This drops the plum/scatter band low to the trees and preserves upper day blues longer
-                if theta < 90.0:
+                # Compute effective solar dip grid metric continuously across the azimuth coordinates
+                effective_dip = solar_dip + (1.0 - h_scatter[y_idx, x_idx]) * 5.0
+                effective_dip = np.clip(effective_dip, 0, 18)
+                
+                # Recalculate horizontal scatter tracking for this step
+                scat = h_scatter[y_idx, x_idx]
+                
+                twilight_horiz = color_twilight_horiz * (1.0 - h_factor) * scat + color_night_horiz * (1.0 - (1.0 - h_factor) * scat)
+                local_horiz_rgb = horiz_day * day_intensity + (1.0 - day_intensity) * twilight_horiz
+                
+                # FIXED: Rewritten twilight tracking parameters to natively dump colors at -12° solar dip
+                if sun_deg <= 0 and effective_dip < 12.0:
+                    m_factor = np.clip(effective_dip / 12.0, 0, 1)
+                    local_mid_rgb = color_twilight_mid * (1.0 - m_factor) * scat + color_night_horiz * (1.0 - (1.0 - m_factor) * scat)
+                    
                     if v_frac < 0.30:
                         h_blend = v_frac / 0.30
-                        night_sky_block = night_horiz * (1.0 - h_blend) + color_twilight_mid * h_blend
+                        night_sky_block = local_horiz_rgb * (1.0 - h_blend) + local_mid_rgb * h_blend
                     else:
                         t_blend = (v_frac - 0.30) / 0.70
-                        night_sky_block = color_twilight_mid * (1.0 - t_blend) + color_night_top * t_blend
+                        night_sky_block = local_mid_rgb * (1.0 - t_blend) + color_night_top * t_blend
                 else:
-                    night_sky_block = night_horiz * (1.0 - v_frac) + color_night_top * v_frac
+                    night_sky_block = local_horiz_rgb * (1.0 - v_frac) + color_night_top * v_frac
                 
-                # FIXED: Tuned the day-to-night interpolation curves using a non-linear scale factor
-                # This allows the bright daytime sky states to dominate safely during early twilight steps
                 if sun_deg > 2.0:
                     pixel_rgb = day_sky_block
                 elif sun_deg > -12.0:
                     raw_factor = np.clip((sun_deg - (-12.0)) / 14.0, 0, 1)
-                    # Squaring the factor weights it heavily toward the day states when the sun is near 0°
                     transition_factor = np.power(raw_factor, 1.8)
                     pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
                 else:
