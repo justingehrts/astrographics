@@ -135,6 +135,10 @@ if st.button("Generate Sky Graphic", type="primary"):
                              np.cos(rad_alt_mesh) * np.cos(rad_sun_alt) * np.cos(rad_az_mesh - rad_sun_az))
         scatter_angle_deg = np.degrees(np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0)))
         
+        # Vectorized calculation of horizontal azimuth offsets across the frame
+        rad_diff_mesh = np.radians(X_mesh - sun_az_deg)
+        h_scatter = np.exp(-((1.0 - np.cos(rad_diff_mesh)) * (180.0 / np.pi) / 85.0)**2)
+        
         # Track continuous shift parameters from daylight down to full midnight dark limits
         solar_dip = np.clip(abs(sun_deg), 0, 18) if sun_deg <= 0 else 0.0
         day_intensity = np.clip(sun_deg / 15.0, 0, 1) if sun_deg > 0 else 0.0
@@ -143,7 +147,11 @@ if st.button("Generate Sky Graphic", type="primary"):
         color_day_top = np.array([26, 102, 255]) / 255.0      
         color_day_horiz = np.array([153, 204, 255]) / 255.0    
         color_twilight_horiz = np.array([212, 138, 59]) / 255.0 
-        color_twilight_mid = np.array([72, 54, 94]) / 255.0     
+        
+        # FIXED: Adjusted mid-twilight profile to a luminous greenish-teal/cyan vector
+        # This models the soft mixing of golden horizon scatter and high-altitude daytime Rayleigh blue
+        color_twilight_mid = np.array([45, 115, 138]) / 255.0     
+        
         color_night_top = np.array([11, 17, 32]) / 255.0       
         color_night_horiz = np.array([22, 34, 56]) / 255.0     
         
@@ -242,12 +250,13 @@ if st.button("Generate Sky Graphic", type="primary"):
             )
 
         # 4. PLOT PLANETS & DYNAMIC MOON ENGINE
+        # FIXED: Scaled down planet marker bounds for broadcast crispness
         bodies = {
-            'mercury': (eph['mercury'], 40, 'Mercury'),
-            'venus': (eph['venus'], 70, 'Venus'),
-            'mars': (eph['mars'], 40, 'Mars'),
-            'jupiter': (eph['jupiter_barycenter'], 90, 'Jupiter'),
-            'saturn': (eph['saturn_barycenter'], 60, 'Saturn')
+            'mercury': (eph['mercury'], 16, 'Mercury'),  
+            'venus': (eph['venus'], 35, 'Venus'),      
+            'mars': (eph['mars'], 16, 'Mars'),         
+            'jupiter': (eph['jupiter_barycenter'], 45, 'Jupiter'), 
+            'saturn': (eph['saturn_barycenter'], 24, 'Saturn')     
         }
         
         for name, (body, size, label) in bodies.items():
@@ -262,11 +271,12 @@ if st.button("Generate Sky Graphic", type="primary"):
                     body_az += 360
                     
                 if az_min <= body_az <= az_max and 0 <= body_alt <= 40:
-                    color = "#ffffff" if name in ['venus', 'jupiter'] else "#ff9999"
+                    # FIXED: Mars gets native coral-red, Mercury and others get pure crisp white
+                    color = "#ff8866" if name == 'mars' else "#ffffff"
                     ax.scatter(body_az, body_alt, s=size, color=color, zorder=50)
                     
                     if show_labels:
-                        ax.text(body_az + 0.6, body_alt + 0.6, label, color="#ffffff", fontsize=11, weight='bold', zorder=51)
+                        ax.text(body_az + 0.5, body_alt + 0.5, label, color="#ffffff", fontsize=10, weight='bold', zorder=51)
             except Exception:
                 continue
 
@@ -291,38 +301,30 @@ if st.button("Generate Sky Graphic", type="primary"):
                 elongation = np.arccos(np.clip(m_dot_s, -1.0, 1.0))
                 illuminated_fraction = 0.5 * (1.0 + np.cos(elongation))
                 
-                # FIXED: Calculate the exact Position Angle of Bright Limb (PABL) 
-                # This determines the precise geometric angle pointing back toward the sunset vector
                 pabl_rad = np.arctan2(sun_alt.degrees - moon_alt, sun_az_deg - moon_az)
                 
-                # Geometry bounds setup (Scaled cleanly for a rectangular 90-degree canvas frame)
                 r_x = 0.65  
                 r_y = r_x * 1.33 
                 
                 num_points = 30
                 y_coords = np.linspace(-r_y, r_y, num_points)
                 
-                # Generate standard raw baseline coordinates
                 x_outer_raw = np.sqrt(np.clip(r_x**2 * (1.0 - (y_coords/r_y)**2), 0, None))
                 phase_modifier = (illuminated_fraction - 0.5) * 2.0
                 x_inner_raw = x_outer_raw * phase_modifier
                 
-                # Process 2D matrix coordinate mapping rotation relative to PABL angle
-                # This guarantees the bright limb faces the sunset perfectly at all times
                 cos_p, sin_p = np.cos(pabl_rad), np.sin(pabl_rad)
                 
                 verts = []
-                # Rotate and map the outer crescent edge
                 for idx in range(num_points):
                     rx = x_outer_raw[idx] * cos_p - y_coords[idx] * sin_p
                     ry = x_outer_raw[idx] * sin_p + y_coords[idx] * cos_p
                     verts.append((moon_az + rx, moon_alt + ry))
-                # Rotate and map the internal phase terminator boundary edge
                 for idx in reversed(range(num_points)):
                     rx = x_inner_raw[idx] * cos_p - y_coords[idx] * sin_p
                     ry = x_inner_raw[idx] * sin_p + y_coords[idx] * cos_p
                     verts.append((moon_az + rx, moon_alt + ry))
-                verts.append(verts[0]) # Secure closed vertex loop
+                verts.append(verts[0]) 
                 
                 codes = [Path.MOVETO] + [Path.LINETO] * (len(verts) - 2) + [Path.CLOSEPOLY]
                 moon_path = Path(verts, codes)
@@ -340,6 +342,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             pass
 
         # 5. PLOT TRUE CALCULATED NAVIGATIONAL STARS
+        # FIXED: Scaled size down and added high-fidelity alpha values to prevent clutter
         if sun_deg <= -6:
             star_data = [
                 ("Polaris", 1.97, (2, 31, 49.1), (89, 15, 51)),
@@ -370,10 +373,10 @@ if st.button("Generate Sky Graphic", type="primary"):
                             star_az += 360
                             
                         if az_min <= star_az <= az_max and 0 <= star_alt <= 40:
-                            size = max(4, (5.0 - mag) * 6)
-                            ax.scatter(star_az, star_alt, s=size, color="#ffffff", alpha=0.8, zorder=20)
+                            size = max(1.5, (5.0 - mag) * 2.5)
+                            ax.scatter(star_az, star_alt, s=size, color="#ffffff", alpha=0.55, zorder=20)
                             if show_labels:
-                                ax.text(star_az + 0.5, star_alt + 0.5, name, color="#ffffff", fontsize=9, alpha=0.6, zorder=21)
+                                ax.text(star_az + 0.4, star_alt + 0.4, name, color="#ffffff", fontsize=8, alpha=0.5, zorder=21)
                     except Exception:
                         continue
 
