@@ -112,6 +112,32 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_alt, sun_az, _ = sun_astrometric.apparent().altaz()
         sun_deg = sun_alt.degrees
         sun_az_deg = sun_az.degrees
+
+# --- TIMEOUT DIAGNOSTIC: APPARENT HORIZON COORDINATE AUDIT ---
+try:
+    # 1. Fetch Sun coordinates
+    sun_diag = eph['sun']
+    sun_ast = observer_loc.at(t).observe(sun_diag)
+    s_alt, s_az, _ = sun_ast.apparent().altaz()
+    
+    # 2. Fetch Moon coordinates
+    moon_diag = eph['moon']
+    moon_ast = observer_loc.at(t).observe(moon_body)
+    m_alt, m_az, _ = moon_ast.apparent().altaz()
+    
+    # 3. Fetch Mercury coordinates
+    merc_diag = eph['mercury']
+    merc_ast = observer_loc.at(t).observe(merc_diag)
+    me_alt, me_az, _ = merc_ast.apparent().altaz()
+    
+    st.sidebar.markdown("### 🔍 Raw Math Coordinates")
+    st.sidebar.code(
+        f"SUN:   Alt {s_alt.degrees:.3f}° | Az {s_az.degrees:.3f}°\n"
+        f"MOON:  Alt {m_alt.degrees:.3f}° | Az {m_az.degrees:.3f}°\n"
+        f"MERC:  Alt {me_alt.degrees:.3f}° | Az {me_az.degrees:.3f}°"
+    )
+except Exception as e:
+    st.sidebar.error(f"Diagnostic failed: {str(e)}")
         
         # 2. INITIALIZE MATPLOTLIB CANVAS
         fig, ax = plt.subplots(figsize=(12, 6.75))
