@@ -133,6 +133,10 @@ if st.button("Generate Sky Graphic", type="primary"):
                              np.cos(rad_alt_mesh) * np.cos(rad_sun_alt) * np.cos(rad_az_mesh - rad_sun_az))
         scatter_angle_deg = np.degrees(np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0)))
         
+        # Vectorized calculation of horizontal azimuth offsets across the frame
+        rad_diff_mesh = np.radians(X_mesh - sun_az_deg)
+        h_scatter = np.exp(-((1.0 - np.cos(rad_diff_mesh)) * (180.0 / np.pi) / 85.0)**2)
+        
         # Track continuous shift parameters from daylight down to full midnight dark limits
         solar_dip = np.clip(abs(sun_deg), 0, 18) if sun_deg <= 0 else 0.0
         day_intensity = np.clip(sun_deg / 15.0, 0, 1) if sun_deg > 0 else 0.0
@@ -155,7 +159,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             alt_val = y_space[y_idx]
             v_frac = alt_val / 40.0  
             
-for x_idx in range(x_pixels):
+            for x_idx in range(x_pixels):
                 theta = scatter_angle_deg[y_idx, x_idx]
                 az_val = x_space[x_idx]
                 
@@ -178,7 +182,7 @@ for x_idx in range(x_pixels):
                 # Safely calculate h_factor using the active effective_dip loop value
                 h_factor = np.clip(effective_dip / 12.0, 0, 1) if sun_deg <= 0 else 0.0
                 
-                # FIXED: Matched twilight_horiz variables cleanly and scaled ambient backscatter
+                # Variable matching fix: unified to use day_horiz cleanly
                 twilight_horiz = color_twilight_horiz * (1.0 - h_factor) * scat + color_night_horiz * (1.0 - (1.0 - h_factor) * scat) + (color_twilight_mid * 0.15 * b_scatter * (1.0 - h_factor))
                 local_horiz_rgb = day_horiz * day_intensity + (1.0 - day_intensity) * twilight_horiz
                 
