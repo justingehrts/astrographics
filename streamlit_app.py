@@ -122,12 +122,18 @@ if st.button("Generate Sky Graphic", type="primary"):
         y_space = np.linspace(0, 40, y_pixels)
         X_mesh, Y_mesh = np.meshgrid(x_space, y_space)
         
-        if sun_deg > 0:
-            # Daytime Sky: Rich atmospheric blue
+        # FIXED: Extended the daylight/early twilight window to sun_deg > -2.0.
+        # This keeps the sky bright, vivid, and realistic up through 15-20 minutes post-sunset.
+        if sun_deg > -2.0:
             grid_color = "#ffffff"
             bg_image = np.zeros((y_pixels, x_pixels, 3))
-            top_rgb = np.array([26, 102, 255]) / 255.0
-            horiz_rgb = np.array([153, 204, 255]) / 255.0
+            
+            # Linear scaling to gradually transition from full daylight blue to deep golden dusk
+            day_progress = np.clip((sun_deg + 2.0) / 4.0, 0, 1) # 1.0 at noon, 0.0 at mid civil twilight
+            
+            top_rgb = day_progress * (np.array([26, 102, 255]) / 255.0) + (1.0 - day_progress) * (np.array([24, 38, 68]) / 255.0)
+            horiz_rgb = day_progress * (np.array([153, 204, 255]) / 255.0) + (1.0 - day_progress) * (np.array([232, 155, 74]) / 255.0)
+            
             for y in range(y_pixels):
                 frac = y / float(y_pixels)
                 bg_image[y, :, :] = horiz_rgb * (1.0 - frac) + top_rgb * frac
@@ -148,13 +154,12 @@ if st.button("Generate Sky Graphic", type="primary"):
             
             bg_image = np.zeros((y_pixels, x_pixels, 3))
             
-            # Vectorized calculation of horizontal azimuth offsets across the frame
-            # Broadened denominator from 45.0 to 85.0 to allow glow to fill more width natively
             rad_diff = np.radians(X_mesh - sun_az_deg)
             h_scatter = np.exp(-((1.0 - np.cos(rad_diff)) * (180.0 / np.pi) / 85.0)**2)
             
-            # Softened the dip progression scalar to let illumination linger higher and longer
-            effective_dip = solar_dip + (1.0 - h_scatter) * 8.0
+            # FIXED: Lowered the azimuth penalty scalar from 8.0 down to 4.0.
+            # This allows ambient sky light to wrap much more naturally into the eastern view.
+            effective_dip = solar_dip + (1.0 - h_scatter) * 4.0
             effective_dip = np.clip(effective_dip, 0, 18)
             
             for y_idx in range(y_pixels):
@@ -171,7 +176,6 @@ if st.button("Generate Sky Graphic", type="primary"):
                         m_factor = e_dip / 6.0
                         local_mid_rgb = mid_twilight * (1.0 - m_factor) * scat + horiz_night * (1.0 - (1.0 - m_factor) * scat)
                         
-                        # Pushed twilight ceiling from 35% up to 55% altitude to fill out frame height
                         if v_frac < 0.55:
                             pixel_rgb = local_horiz_rgb * (1.0 - (v_frac / 0.55)) + local_mid_rgb * (v_frac / 0.55)
                         else:
