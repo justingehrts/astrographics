@@ -133,10 +133,6 @@ if st.button("Generate Sky Graphic", type="primary"):
                              np.cos(rad_alt_mesh) * np.cos(rad_sun_alt) * np.cos(rad_az_mesh - rad_sun_az))
         scatter_angle_deg = np.degrees(np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0)))
         
-        # Vectorized calculation of horizontal azimuth offsets across the frame
-        rad_diff_mesh = np.radians(X_mesh - sun_az_deg)
-        h_scatter = np.exp(-((1.0 - np.cos(rad_diff_mesh)) * (180.0 / np.pi) / 85.0)**2)
-        
         # Track continuous shift parameters from daylight down to full midnight dark limits
         solar_dip = np.clip(abs(sun_deg), 0, 18) if sun_deg <= 0 else 0.0
         day_intensity = np.clip(sun_deg / 15.0, 0, 1) if sun_deg > 0 else 0.0
@@ -182,7 +178,6 @@ if st.button("Generate Sky Graphic", type="primary"):
                 # Safely calculate h_factor using the active effective_dip loop value
                 h_factor = np.clip(effective_dip / 12.0, 0, 1) if sun_deg <= 0 else 0.0
                 
-                # Variable matching fix: unified to use day_horiz cleanly
                 twilight_horiz = color_twilight_horiz * (1.0 - h_factor) * scat + color_night_horiz * (1.0 - (1.0 - h_factor) * scat) + (color_twilight_mid * 0.15 * b_scatter * (1.0 - h_factor))
                 local_horiz_rgb = day_horiz * day_intensity + (1.0 - day_intensity) * twilight_horiz
                 
@@ -220,7 +215,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             zorder=0
         )
         
-        # --- ENGINE: URBAN SKY GLOW DOME IMAGE OVERLAY ---
+        # --- OVERHAULED ENGINE: MODERN LED HORIZONTAL CITY GLOW DOME ---
         if star_brightness <= 1.5 and sun_deg <= 0:
             x_glow, y_glow = 200, 100
             x_g_space = np.linspace(az_min, az_max, x_glow)
@@ -228,12 +223,20 @@ if st.button("Generate Sky Graphic", type="primary"):
             X_m, Y_m = np.meshgrid(x_g_space, y_g_space)
             
             center_az = (az_min + az_max) / 2.0
-            gaussian_glow = np.exp(-((X_m - center_az) / 24.0)**2 - (Y_m / 14.0)**2)
-            glow_base_color = "#e2964d" if star_brightness == 1.0 else "#c97e3a"
+            
+            # FIXED: Drastically widened horizontal spread (70.0) and flattened the vertical scale (10.0)
+            # This simulates a realistic, broad light dome tracking wide over the tree line
+            gaussian_glow = np.exp(-((X_m - center_az) / 70.0)**2 - (Y_m / 10.0)**2)
+            
+            # FIXED: Shifted hex colors to desaturated modern LED whites / soft warm tones
+            # 1.0 (Heavy City) gets a pale crisp bone-white; 1.5 (Urban) gets a subtle ivory mist
+            glow_base_color = "#fbf8f0" if star_brightness == 1.0 else "#f4efe2"
             
             rgba_glow = np.zeros((y_glow, x_glow, 4))
             rgba_glow[..., :3] = matplotlib.colors.to_rgb(glow_base_color)
-            rgba_glow[..., 3] = gaussian_glow * 0.32  
+            
+            # Keep opacity core delicately blended so it doesn't mask low planets entirely
+            rgba_glow[..., 3] = gaussian_glow * 0.28  
             
             ax.imshow(
                 rgba_glow,
