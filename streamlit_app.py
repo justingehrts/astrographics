@@ -155,7 +155,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             alt_val = y_space[y_idx]
             v_frac = alt_val / 40.0  
             
-            for x_idx in range(x_pixels):
+for x_idx in range(x_pixels):
                 theta = scatter_angle_deg[y_idx, x_idx]
                 az_val = x_space[x_idx]
                 
@@ -167,7 +167,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                 day_horiz = color_day_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter)
                 day_sky_block = day_horiz * (1.0 - v_frac) + color_day_top * v_frac
                 
-                # FIXED: Calculate local horizontal scattering directly inside the loop to avoid scoping issues
+                # Calculate local horizontal scattering directly inside the loop to avoid scoping issues
                 rad_diff = np.radians(az_val - sun_az_deg)
                 scat = np.exp(-((1.0 - np.cos(rad_diff)) * (180.0 / np.pi) / 85.0)**2)
                 
@@ -178,8 +178,9 @@ if st.button("Generate Sky Graphic", type="primary"):
                 # Safely calculate h_factor using the active effective_dip loop value
                 h_factor = np.clip(effective_dip / 12.0, 0, 1) if sun_deg <= 0 else 0.0
                 
-                twilight_horiz = color_twilight_horiz * (1.0 - h_factor) * scat + color_night_horiz * (1.0 - (1.0 - h_factor) * scat)
-                local_horiz_rgb = horiz_day * day_intensity + (1.0 - day_intensity) * twilight_horiz
+                # FIXED: Matched twilight_horiz variables cleanly and scaled ambient backscatter
+                twilight_horiz = color_twilight_horiz * (1.0 - h_factor) * scat + color_night_horiz * (1.0 - (1.0 - h_factor) * scat) + (color_twilight_mid * 0.15 * b_scatter * (1.0 - h_factor))
+                local_horiz_rgb = day_horiz * day_intensity + (1.0 - day_intensity) * twilight_horiz
                 
                 # Evaluate active twilight scattering bands cleanly out to a full 12° solar dip
                 if sun_deg <= 0 and effective_dip < 12.0:
