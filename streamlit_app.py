@@ -150,13 +150,14 @@ if st.button("Generate Sky Graphic", type="primary"):
         # Initialize structural RGB float matrix array
         bg_image = np.zeros((y_pixels, x_pixels, 3))
         
-# Vectorized generation of the sky color field using localized scatter metrics
+        # Vectorized generation of the sky color field using localized scatter metrics
         for y_idx in range(y_pixels):
             alt_val = y_space[y_idx]
             v_frac = alt_val / 40.0  
             
             for x_idx in range(x_pixels):
                 theta = scatter_angle_deg[y_idx, x_idx]
+                az_val = x_space[x_idx]
                 
                 # Forward scatter controls sunset intensity; backward scatter handles the anti-solar dark dome
                 f_scatter = np.exp(-(theta / 65.0)**2)
@@ -166,14 +167,15 @@ if st.button("Generate Sky Graphic", type="primary"):
                 day_horiz = color_day_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter)
                 day_sky_block = day_horiz * (1.0 - v_frac) + color_day_top * v_frac
                 
-                # 1. First, fetch the localized horizontal scatter value for this pixel
-                scat = h_scatter[y_idx, x_idx]
+                # FIXED: Calculate local horizontal scattering directly inside the loop to avoid scoping issues
+                rad_diff = np.radians(az_val - sun_az_deg)
+                scat = np.exp(-((1.0 - np.cos(rad_diff)) * (180.0 / np.pi) / 85.0)**2)
                 
-                # 2. Next, calculate the continuous effective solar dip grid metric
+                # Calculate the continuous effective solar dip grid metric
                 effective_dip = solar_dip + (1.0 - scat) * 5.0
                 effective_dip = np.clip(effective_dip, 0, 18)
                 
-                # 3. Finally, safely calculate h_factor using the newly defined effective_dip
+                # Safely calculate h_factor using the active effective_dip loop value
                 h_factor = np.clip(effective_dip / 12.0, 0, 1) if sun_deg <= 0 else 0.0
                 
                 twilight_horiz = color_twilight_horiz * (1.0 - h_factor) * scat + color_night_horiz * (1.0 - (1.0 - h_factor) * scat)
