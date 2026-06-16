@@ -150,7 +150,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         # Initialize structural RGB float matrix array
         bg_image = np.zeros((y_pixels, x_pixels, 3))
         
-        # Vectorized generation of the sky color field using localized scatter metrics
+# Vectorized generation of the sky color field using localized scatter metrics
         for y_idx in range(y_pixels):
             alt_val = y_space[y_idx]
             v_frac = alt_val / 40.0  
@@ -166,20 +166,20 @@ if st.button("Generate Sky Graphic", type="primary"):
                 day_horiz = color_day_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter)
                 day_sky_block = day_horiz * (1.0 - v_frac) + color_day_top * v_frac
                 
-                # Dynamic blend factor for the horizon color array (Extended scale to -12° drop)
-                h_factor = np.clip(effective_dip / 12.0, 0, 1) if sun_deg <= 0 else 0.0
+                # 1. First, fetch the localized horizontal scatter value for this pixel
+                scat = h_scatter[y_idx, x_idx]
                 
-                # Compute effective solar dip grid metric continuously across the azimuth coordinates
-                effective_dip = solar_dip + (1.0 - h_scatter[y_idx, x_idx]) * 5.0
+                # 2. Next, calculate the continuous effective solar dip grid metric
+                effective_dip = solar_dip + (1.0 - scat) * 5.0
                 effective_dip = np.clip(effective_dip, 0, 18)
                 
-                # Recalculate horizontal scatter tracking for this step
-                scat = h_scatter[y_idx, x_idx]
+                # 3. Finally, safely calculate h_factor using the newly defined effective_dip
+                h_factor = np.clip(effective_dip / 12.0, 0, 1) if sun_deg <= 0 else 0.0
                 
                 twilight_horiz = color_twilight_horiz * (1.0 - h_factor) * scat + color_night_horiz * (1.0 - (1.0 - h_factor) * scat)
                 local_horiz_rgb = horiz_day * day_intensity + (1.0 - day_intensity) * twilight_horiz
                 
-                # FIXED: Rewritten twilight tracking parameters to natively dump colors at -12° solar dip
+                # Evaluate active twilight scattering bands cleanly out to a full 12° solar dip
                 if sun_deg <= 0 and effective_dip < 12.0:
                     m_factor = np.clip(effective_dip / 12.0, 0, 1)
                     local_mid_rgb = color_twilight_mid * (1.0 - m_factor) * scat + color_night_horiz * (1.0 - (1.0 - m_factor) * scat)
