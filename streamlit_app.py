@@ -118,6 +118,9 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
+        # FORCE FIXED 5-DEGREE SPACING WITH LABELS
+        ax.set_yticks(np.arange(0, 41, 5))
+        
         # 3. HIGH-FIDELITY SPHERICAL SCATTERING 2D ATMOSPHERIC ENGINE
         x_pixels, y_pixels = 150, 100
         x_space = np.linspace(az_min, az_max, x_pixels)
