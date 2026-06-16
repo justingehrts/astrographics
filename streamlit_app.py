@@ -134,14 +134,13 @@ if st.button("Generate Sky Graphic", type="primary"):
         scatter_angle_deg = np.degrees(np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0)))
         
         # Define high-fidelity atmospheric color profiles
-        color_day_top = np.array([26, 102, 255]) / 255.0      # Rich scattered Rayleigh blue
-        color_day_horiz = np.array([153, 204, 255]) / 255.0    # Bright sunlit white-blue
-        color_twilight_horiz = np.array([212, 138, 59]) / 255.0 # Vivid sunset amber gold
-        color_twilight_mid = np.array([59, 45, 84]) / 255.0    # Twilight purple / Belt of Venus plum
-        color_night_top = np.array([11, 17, 32]) / 255.0       # Midnight cosmic sky navy
-        color_night_horiz = np.array([22, 34, 56]) / 255.0     # Deep twilight slate anchor
+        color_day_top = np.array([26, 102, 255]) / 255.0      
+        color_day_horiz = np.array([153, 204, 255]) / 255.0    
+        color_twilight_horiz = np.array([212, 138, 59]) / 255.0 
+        color_twilight_mid = np.array([72, 54, 94]) / 255.0     # Tuned slightly for cleaner Belt of Venus plum
+        color_night_top = np.array([11, 17, 32]) / 255.0       
+        color_night_horiz = np.array([22, 34, 56]) / 255.0     
         
-        # Dynamically set grid visibility parameters based on solar presence
         grid_color = "#ffffff" if sun_deg > 0 else ("#475569" if sun_deg > -6.0 else "#334155")
         
         # Initialize structural RGB float matrix array
@@ -150,42 +149,42 @@ if st.button("Generate Sky Graphic", type="primary"):
         # Vectorized generation of the sky color field using localized scatter metrics
         for y_idx in range(y_pixels):
             alt_val = y_space[y_idx]
-            v_frac = alt_val / 40.0  # Vertical frame height percentage
+            v_frac = alt_val / 40.0  
             
             for x_idx in range(x_pixels):
                 theta = scatter_angle_deg[y_idx, x_idx]
                 
-                # Calculate localized brightness scalars based on angular proximity to the sun vector
                 # Forward scatter controls sunset intensity; backward scatter handles the anti-solar dark dome
-                f_scatter = np.exp(-(theta / 55.0)**2)
-                b_scatter = np.exp(-((180.0 - theta) / 90.0)**2)
+                f_scatter = np.exp(-(theta / 65.0)**2)
+                b_scatter = np.exp(-((180.0 - theta) / 85.0)**2)
                 
                 # Base daylight profile mapping
                 day_horiz = color_day_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter)
                 day_sky_block = day_horiz * (1.0 - v_frac) + color_day_top * v_frac
                 
-                # Base nighttime profile mapping
-                night_horiz = color_twilight_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter)
+                # Base nighttime profile mapping (Tuned backscatter to give the East a soft, realistic rise)
+                night_horiz = color_twilight_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter) + (color_twilight_mid * 0.4 * b_scatter)
                 
-                if theta < 70.0:
-                    # Inside the primary sunset arc: blend smoothly from horizon gold through plum to the upper sky
-                    if v_frac < 0.55:
-                        h_blend = v_frac / 0.55
+                # FIXED: Lowered the twilight ceiling boundary constraint from 0.55 down to 0.30
+                # This drops the plum/scatter band low to the trees and preserves upper day blues longer
+                if theta < 90.0:
+                    if v_frac < 0.30:
+                        h_blend = v_frac / 0.30
                         night_sky_block = night_horiz * (1.0 - h_blend) + color_twilight_mid * h_blend
                     else:
-                        t_blend = (v_frac - 0.55) / 0.45
+                        t_blend = (v_frac - 0.30) / 0.70
                         night_sky_block = color_twilight_mid * (1.0 - t_blend) + color_night_top * t_blend
                 else:
-                    # Antisolar arc: cross-fade smoothly into midnight blue properties
                     night_sky_block = night_horiz * (1.0 - v_frac) + color_night_top * v_frac
                 
-                # Unify day and night cycles into a single, continuous transition path
-                # Uses a smooth sigmoidal curves from +2.0° down to -12.0° to eliminate all step jumps
+                # FIXED: Tuned the day-to-night interpolation curves using a non-linear scale factor
+                # This allows the bright daytime sky states to dominate safely during early twilight steps
                 if sun_deg > 2.0:
                     pixel_rgb = day_sky_block
                 elif sun_deg > -12.0:
-                    # Interpolate between day parameters and twilight parameters smoothly
-                    transition_factor = np.clip((sun_deg - (-12.0)) / 14.0, 0, 1)
+                    raw_factor = np.clip((sun_deg - (-12.0)) / 14.0, 0, 1)
+                    # Squaring the factor weights it heavily toward the day states when the sun is near 0°
+                    transition_factor = np.power(raw_factor, 1.8)
                     pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
                 else:
                     pixel_rgb = night_sky_block
