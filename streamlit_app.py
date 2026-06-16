@@ -242,7 +242,6 @@ if st.button("Generate Sky Graphic", type="primary"):
             )
 
         # 4. PLOT PLANETS & DYNAMIC MOON ENGINE
-        # Moon has been pulled out of the standard scatter loop to handle native vector path scaling
         bodies = {
             'mercury': (eph['mercury'], 40, 'Mercury'),
             'venus': (eph['venus'], 70, 'Venus'),
@@ -251,7 +250,6 @@ if st.button("Generate Sky Graphic", type="primary"):
             'saturn': (eph['saturn_barycenter'], 60, 'Saturn')
         }
         
-        # First, track standard mathematical point-planets
         for name, (body, size, label) in bodies.items():
             try:
                 astrometric = observer_loc.at(t).observe(body)
@@ -272,7 +270,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             except Exception:
                 continue
 
-        # --- NEW ENGINE: HIGH-FIDELITY VECTORIAL MOON PHASE PATH EXTENSION ---
+        # --- DYNAMIC ROTATIONAL MOON PHASE VECTOR PATH ENGINE ---
         try:
             moon_body = eph['moon']
             moon_astrometric = observer_loc.at(t).observe(moon_body)
@@ -285,60 +283,53 @@ if st.button("Generate Sky Graphic", type="primary"):
                 moon_az += 360
                 
             if az_min <= moon_az <= az_max and 0 <= moon_alt <= 40:
-                # 1. Calculate moon phase mechanics using solar configuration angles
                 sun_body = eph['sun']
                 m_pos = observer_loc.at(t).observe(moon_body).position.au
                 s_pos = observer_loc.at(t).observe(sun_body).position.au
                 
-                # Dot product separation tracking
                 m_dot_s = np.dot(m_pos, s_pos) / (np.linalg.norm(m_pos) * np.linalg.norm(s_pos))
                 elongation = np.arccos(np.clip(m_dot_s, -1.0, 1.0))
-                
-                # Phase percentage mapping (0.0 = New, 1.0 = Full)
                 illuminated_fraction = 0.5 * (1.0 + np.cos(elongation))
                 
-                # Determine orientation: Is the moon waxing or waning?
-                # Check if the moon's ecliptic longitude leads or lags the sun
-                # For a clean visual approximation, we look at relative azimuth placement
-                is_waxing = ((moon_az - sun_az_deg) % 360) < 180.0
+                # FIXED: Calculate the exact Position Angle of Bright Limb (PABL) 
+                # This determines the precise geometric angle pointing back toward the sunset vector
+                pabl_rad = np.arctan2(sun_alt.degrees - moon_alt, sun_az_deg - moon_az)
                 
-                # 2. Establish drawing radius scaling factors (Tuned for 90° frame view)
-                r_x = 0.65  # Horizontal width scale in graph units
-                r_y = r_x * 1.33 # Correct aspect mapping for rectangular view spines
+                # Geometry bounds setup (Scaled cleanly for a rectangular 90-degree canvas frame)
+                r_x = 0.65  
+                r_y = r_x * 1.33 
                 
-                # 3. Construct the vector arcs
-                # The path combines a base semicircle with a dynamic illuminated limb
                 num_points = 30
                 y_coords = np.linspace(-r_y, r_y, num_points)
                 
-                # Outermost arc curve path boundary
-                x_outer = np.sqrt(np.clip(r_x**2 * (1.0 - (y_coords/r_y)**2), 0, None))
-                if not is_waxing:
-                    x_outer = -x_outer
-                    
-                # Innermost phase transition divider line
-                # Morphing scale goes from -1 (Full Dark) to +1 (Full Light) matching illumination metrics
+                # Generate standard raw baseline coordinates
+                x_outer_raw = np.sqrt(np.clip(r_x**2 * (1.0 - (y_coords/r_y)**2), 0, None))
                 phase_modifier = (illuminated_fraction - 0.5) * 2.0
-                x_inner = x_outer * phase_modifier
+                x_inner_raw = x_outer_raw * phase_modifier
                 
-                # Compile vertices into a closed Matplotlib polygon path object
+                # Process 2D matrix coordinate mapping rotation relative to PABL angle
+                # This guarantees the bright limb faces the sunset perfectly at all times
+                cos_p, sin_p = np.cos(pabl_rad), np.sin(pabl_rad)
+                
                 verts = []
-                # Ascend the outer lit edge
+                # Rotate and map the outer crescent edge
                 for idx in range(num_points):
-                    verts.append((moon_az + x_outer[idx], moon_alt + y_coords[idx]))
-                # Descend the internal phase shade terminator edge
+                    rx = x_outer_raw[idx] * cos_p - y_coords[idx] * sin_p
+                    ry = x_outer_raw[idx] * sin_p + y_coords[idx] * cos_p
+                    verts.append((moon_az + rx, moon_alt + ry))
+                # Rotate and map the internal phase terminator boundary edge
                 for idx in reversed(range(num_points)):
-                    verts.append((moon_az + x_inner[idx], moon_alt + y_coords[idx]))
-                verts.append(verts[0]) # Lock close loop
+                    rx = x_inner_raw[idx] * cos_p - y_coords[idx] * sin_p
+                    ry = x_inner_raw[idx] * sin_p + y_coords[idx] * cos_p
+                    verts.append((moon_az + rx, moon_alt + ry))
+                verts.append(verts[0]) # Secure closed vertex loop
                 
                 codes = [Path.MOVETO] + [Path.LINETO] * (len(verts) - 2) + [Path.CLOSEPOLY]
                 moon_path = Path(verts, codes)
                 
-                # Render the bright moon limb patch
                 moon_patch = patches.PathPatch(moon_path, facecolor='#ffffff', edgecolor='none', zorder=50)
                 ax.add_patch(moon_patch)
                 
-                # Optional: Render a faint structural dark-disk backing for dark-crescent phases
                 if illuminated_fraction < 0.90:
                     dark_disk = patches.Ellipse((moon_az, moon_alt), width=r_x*2, height=r_y*2, facecolor='#ffffff', alpha=0.08, edgecolor='none', zorder=49)
                     ax.add_patch(dark_disk)
