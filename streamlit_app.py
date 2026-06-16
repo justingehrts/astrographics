@@ -5,6 +5,8 @@ import matplotlib
 matplotlib.use("Agg")  # Safe headless execution for cloud servers
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.path import Path
+import matplotlib.patches as patches
 import io
 import numpy as np
 
@@ -215,7 +217,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             zorder=0
         )
         
-        # --- OVERHAULED ENGINE: MODERN LED HORIZONTAL CITY GLOW DOME ---
+        # --- ENGINE: MODERN LED HORIZONTAL CITY GLOW DOME ---
         if star_brightness <= 1.5 and sun_deg <= 0:
             x_glow, y_glow = 200, 100
             x_g_space = np.linspace(az_min, az_max, x_glow)
@@ -223,19 +225,11 @@ if st.button("Generate Sky Graphic", type="primary"):
             X_m, Y_m = np.meshgrid(x_g_space, y_g_space)
             
             center_az = (az_min + az_max) / 2.0
-            
-            # FIXED: Drastically widened horizontal spread (70.0) and flattened the vertical scale (10.0)
-            # This simulates a realistic, broad light dome tracking wide over the tree line
             gaussian_glow = np.exp(-((X_m - center_az) / 70.0)**2 - (Y_m / 10.0)**2)
-            
-            # FIXED: Shifted hex colors to desaturated modern LED whites / soft warm tones
-            # 1.0 (Heavy City) gets a pale crisp bone-white; 1.5 (Urban) gets a subtle ivory mist
             glow_base_color = "#fbf8f0" if star_brightness == 1.0 else "#f4efe2"
             
             rgba_glow = np.zeros((y_glow, x_glow, 4))
             rgba_glow[..., :3] = matplotlib.colors.to_rgb(glow_base_color)
-            
-            # Keep opacity core delicately blended so it doesn't mask low planets entirely
             rgba_glow[..., 3] = gaussian_glow * 0.28  
             
             ax.imshow(
@@ -247,9 +241,9 @@ if st.button("Generate Sky Graphic", type="primary"):
                 interpolation="bilinear"
             )
 
-        # 4. PLOT PLANETS & MOON
+        # 4. PLOT PLANETS & DYNAMIC MOON ENGINE
+        # Moon has been pulled out of the standard scatter loop to handle native vector path scaling
         bodies = {
-            'moon': (eph['moon'], 180, 'Moon'),
             'mercury': (eph['mercury'], 40, 'Mercury'),
             'venus': (eph['venus'], 70, 'Venus'),
             'mars': (eph['mars'], 40, 'Mars'),
@@ -257,6 +251,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             'saturn': (eph['saturn_barycenter'], 60, 'Saturn')
         }
         
+        # First, track standard mathematical point-planets
         for name, (body, size, label) in bodies.items():
             try:
                 astrometric = observer_loc.at(t).observe(body)
@@ -269,13 +264,89 @@ if st.button("Generate Sky Graphic", type="primary"):
                     body_az += 360
                     
                 if az_min <= body_az <= az_max and 0 <= body_alt <= 40:
-                    color = "#ffffff" if name in ['moon', 'venus', 'jupiter'] else "#ff9999"
+                    color = "#ffffff" if name in ['venus', 'jupiter'] else "#ff9999"
                     ax.scatter(body_az, body_alt, s=size, color=color, zorder=50)
                     
                     if show_labels:
                         ax.text(body_az + 0.6, body_alt + 0.6, label, color="#ffffff", fontsize=11, weight='bold', zorder=51)
             except Exception:
                 continue
+
+        # --- NEW ENGINE: HIGH-FIDELITY VECTORIAL MOON PHASE PATH EXTENSION ---
+        try:
+            moon_body = eph['moon']
+            moon_astrometric = observer_loc.at(t).observe(moon_body)
+            m_alt, m_az, _ = moon_astrometric.apparent().altaz()
+            
+            moon_az = m_az.degrees
+            moon_alt = m_alt.degrees
+            
+            if direction == "North" and moon_az < 90:
+                moon_az += 360
+                
+            if az_min <= moon_az <= az_max and 0 <= moon_alt <= 40:
+                # 1. Calculate moon phase mechanics using solar configuration angles
+                sun_body = eph['sun']
+                m_pos = observer_loc.at(t).observe(moon_body).position.au
+                s_pos = observer_loc.at(t).observe(sun_body).position.au
+                
+                # Dot product separation tracking
+                m_dot_s = np.dot(m_pos, s_pos) / (np.linalg.norm(m_pos) * np.linalg.norm(s_pos))
+                elongation = np.arccos(np.clip(m_dot_s, -1.0, 1.0))
+                
+                # Phase percentage mapping (0.0 = New, 1.0 = Full)
+                illuminated_fraction = 0.5 * (1.0 + np.cos(elongation))
+                
+                # Determine orientation: Is the moon waxing or waning?
+                # Check if the moon's ecliptic longitude leads or lags the sun
+                # For a clean visual approximation, we look at relative azimuth placement
+                is_waxing = ((moon_az - sun_az_deg) % 360) < 180.0
+                
+                # 2. Establish drawing radius scaling factors (Tuned for 90° frame view)
+                r_x = 0.65  # Horizontal width scale in graph units
+                r_y = r_x * 1.33 # Correct aspect mapping for rectangular view spines
+                
+                # 3. Construct the vector arcs
+                # The path combines a base semicircle with a dynamic illuminated limb
+                num_points = 30
+                y_coords = np.linspace(-r_y, r_y, num_points)
+                
+                # Outermost arc curve path boundary
+                x_outer = np.sqrt(np.clip(r_x**2 * (1.0 - (y_coords/r_y)**2), 0, None))
+                if not is_waxing:
+                    x_outer = -x_outer
+                    
+                # Innermost phase transition divider line
+                # Morphing scale goes from -1 (Full Dark) to +1 (Full Light) matching illumination metrics
+                phase_modifier = (illuminated_fraction - 0.5) * 2.0
+                x_inner = x_outer * phase_modifier
+                
+                # Compile vertices into a closed Matplotlib polygon path object
+                verts = []
+                # Ascend the outer lit edge
+                for idx in range(num_points):
+                    verts.append((moon_az + x_outer[idx], moon_alt + y_coords[idx]))
+                # Descend the internal phase shade terminator edge
+                for idx in reversed(range(num_points)):
+                    verts.append((moon_az + x_inner[idx], moon_alt + y_coords[idx]))
+                verts.append(verts[0]) # Lock close loop
+                
+                codes = [Path.MOVETO] + [Path.LINETO] * (len(verts) - 2) + [Path.CLOSEPOLY]
+                moon_path = Path(verts, codes)
+                
+                # Render the bright moon limb patch
+                moon_patch = patches.PathPatch(moon_path, facecolor='#ffffff', edgecolor='none', zorder=50)
+                ax.add_patch(moon_patch)
+                
+                # Optional: Render a faint structural dark-disk backing for dark-crescent phases
+                if illuminated_fraction < 0.90:
+                    dark_disk = patches.Ellipse((moon_az, moon_alt), width=r_x*2, height=r_y*2, facecolor='#ffffff', alpha=0.08, edgecolor='none', zorder=49)
+                    ax.add_patch(dark_disk)
+                    
+                if show_labels:
+                    ax.text(moon_az + r_x + 0.4, moon_alt + 0.6, "Moon", color="#ffffff", fontsize=11, weight='bold', zorder=51)
+        except Exception:
+            pass
 
         # 5. PLOT TRUE CALCULATED NAVIGATIONAL STARS
         if sun_deg <= -6:
