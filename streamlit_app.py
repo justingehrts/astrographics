@@ -132,8 +132,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         except Exception as e:
             st.sidebar.error(f"Diagnostic failed: {str(e)}")
             
-        # 2. INITIALIZE MATPLOTLIB CANVAS
-        fig, ax = plt.subplots(figsize=(12, 6.75))
+        # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
+        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100)
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
@@ -448,4 +448,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             data=img_buf,
             file_name=f"custom_sky_{direction}.png",
             mime="image/png"
+
+            # Completely clear out the figure state to prevent scaling bleed on re-runs
+            plt.close(fig)
         )
