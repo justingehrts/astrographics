@@ -315,29 +315,41 @@ if st.button("Generate Sky Graphic", type="primary"):
                 
                 pabl_rad = np.arctan2(sun_alt.degrees - moon_alt, sun_az_deg - moon_az)
                 
-                # FIXED: Applied dynamic physical-to-data scale correction factor (~0.7901)
-                # This ensures the vector path maps onto the screen as a true geometric sphere
+                # Base horizontal width in grid degrees
                 r_x = 0.65  
-                r_y = r_x * (12.0 / 90.0) / (6.75 / 40.0) 
+                r_y = r_x * (12.0 / 90.0) / (6.75 / 40.0) # ~0.7901 aspect compensation factor
                 
+                # FIXED: Generate vertices inside a perfectly uniform, symmetrical unit circular space first
                 num_points = 30
-                y_coords = np.linspace(-r_y, r_y, num_points)
+                phi = np.linspace(-np.pi/2, np.pi/2, num_points)
                 
-                x_outer_raw = np.sqrt(np.clip(r_x**2 * (1.0 - (y_coords/r_y)**2), 0, None))
+                x_outer_unit = np.cos(phi)
+                y_outer_unit = np.sin(phi)
+                
                 phase_modifier = (illuminated_fraction - 0.5) * 2.0
-                x_inner_raw = x_outer_raw * phase_modifier
+                x_inner_unit = x_outer_unit * phase_modifier
+                y_inner_unit = y_outer_unit
                 
                 cos_p, sin_p = np.cos(pabl_rad), np.sin(pabl_rad)
                 
                 verts = []
+                # 1. Rotate the outer crescent edge inside symmetrical unit circle space first
                 for idx in range(num_points):
-                    rx = x_outer_raw[idx] * cos_p - y_coords[idx] * sin_p
-                    ry = x_outer_raw[idx] * sin_p + y_coords[idx] * cos_p
+                    x_rot = x_outer_unit[idx] * cos_p - y_outer_unit[idx] * sin_p
+                    y_rot = x_outer_unit[idx] * sin_p + y_outer_unit[idx] * cos_p
+                    # Map to the stretched graph dimensions last to ensure it remains a perfect circle on air
+                    rx = x_rot * r_x
+                    ry = y_rot * r_y
                     verts.append((moon_az + rx, moon_alt + ry))
+                    
+                # 2. Rotate the internal phase shading terminator edge inside unit space
                 for idx in reversed(range(num_points)):
-                    rx = x_inner_raw[idx] * cos_p - y_coords[idx] * sin_p
-                    ry = x_inner_raw[idx] * sin_p + y_coords[idx] * cos_p
+                    x_rot = x_inner_unit[idx] * cos_p - y_inner_unit[idx] * sin_p
+                    y_rot = x_inner_unit[idx] * sin_p + y_inner_unit[idx] * cos_p
+                    rx = x_rot * r_x
+                    ry = y_rot * r_y
                     verts.append((moon_az + rx, moon_alt + ry))
+                    
                 verts.append(verts[0]) 
                 
                 codes = [Path.MOVETO] + [Path.LINETO] * (len(verts) - 2) + [Path.CLOSEPOLY]
