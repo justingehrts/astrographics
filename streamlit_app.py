@@ -114,7 +114,6 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_az_deg = sun_az.degrees
         
         # --- TROUBLESHOOTING SIDEBAR READOUT ---
-        # Natively tracks the true geometric altitude/azimuth calculation values
         try:
             moon_diag = eph['moon']
             moon_ast = observer_loc.at(t).observe(moon_diag)
@@ -167,8 +166,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         color_day_top = np.array([26, 102, 255]) / 255.0      
         color_day_horiz = np.array([153, 204, 255]) / 255.0    
         color_twilight_horiz = np.array([212, 138, 59]) / 255.0 
-        # Boosted the green/blue channels slightly to inject more ambient luminance
-        color_twilight_mid = np.array([55, 135, 160]) / 255.0    
+        color_twilight_mid = np.array([55, 135, 160]) / 255.0     
         color_night_top = np.array([11, 17, 32]) / 255.0       
         color_night_horiz = np.array([22, 34, 56]) / 255.0     
         
@@ -226,9 +224,6 @@ if st.button("Generate Sky Graphic", type="primary"):
                     pixel_rgb = day_sky_block
                 elif sun_deg > -12.0:
                     raw_factor = np.clip((sun_deg - (-12.0)) / 14.0, 0, 1)
-                    
-                    # FIXED: Dropped the power exponent from 1.8 down to 1.1 
-                    # This allows a much more realistic, linear, and slower decay of twilight horizon light
                     transition_factor = np.power(raw_factor, 1.1)
                     pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
                 else:
@@ -290,7 +285,6 @@ if st.button("Generate Sky Graphic", type="primary"):
                     body_az += 360
                     
                 if az_min <= body_az <= az_max and 0 <= body_alt <= 40:
-                    # All planets render strictly pure white
                     ax.scatter(body_az, body_alt, s=size, color="#ffffff", zorder=50)
                     
                     if show_labels:
@@ -321,8 +315,10 @@ if st.button("Generate Sky Graphic", type="primary"):
                 
                 pabl_rad = np.arctan2(sun_alt.degrees - moon_alt, sun_az_deg - moon_az)
                 
+                # FIXED: Applied dynamic physical-to-data scale correction factor (~0.7901)
+                # This ensures the vector path maps onto the screen as a true geometric sphere
                 r_x = 0.65  
-                r_y = r_x * 1.33 
+                r_y = r_x * (12.0 / 90.0) / (6.75 / 40.0) 
                 
                 num_points = 30
                 y_coords = np.linspace(-r_y, r_y, num_points)
