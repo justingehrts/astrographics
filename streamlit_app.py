@@ -112,26 +112,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_alt, sun_az, _ = sun_astrometric.apparent().altaz()
         sun_deg = sun_alt.degrees
         sun_az_deg = sun_az.degrees
-        
-        # --- TROUBLESHOOTING SIDEBAR READOUT ---
-        try:
-            moon_diag = eph['moon']
-            moon_ast = observer_loc.at(t).observe(moon_diag)
-            m_alt, m_az, _ = moon_ast.apparent().altaz()
-            
-            merc_diag = eph['mercury']
-            merc_ast = observer_loc.at(t).observe(merc_diag)
-            me_alt, me_az, _ = merc_ast.apparent().altaz()
-            
-            st.sidebar.markdown("### 🔍 Raw Math Coordinates")
-            st.sidebar.code(
-                f"SUN:   Alt {sun_deg:.3f}° | Az {sun_az_deg:.3f}°\n"
-                f"MOON:  Alt {m_alt.degrees:.3f}° | Az {m_az.degrees:.3f}°\n"
-                f"MERC:  Alt {me_alt.degrees:.3f}° | Az {me_az.degrees:.3f}°"
-            )
-        except Exception as e:
-            st.sidebar.error(f"Diagnostic failed: {str(e)}")
-            
+                
         # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
         fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100)
         ax.set_xlim(az_min, az_max)
