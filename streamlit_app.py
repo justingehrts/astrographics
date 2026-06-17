@@ -405,7 +405,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                     except Exception:
                         continue
 
-        # 6. FIXED SUBURBAN TREE HORIZON SILHOUETTE
+# 6. FIXED SUBURBAN TREE HORIZON SILHOUETTE
         x_silhouette_space = np.linspace(az_min, az_max, 400)
         base_ground = 4.0 + 1.0 * np.sin(x_silhouette_space / 5)
         tree_canopy = 1.2 * np.sin(x_silhouette_space * 2.5) * np.cos(x_silhouette_space * 0.4)
@@ -443,12 +443,13 @@ if st.button("Generate Sky Graphic", type="primary"):
         )
         img_buf.seek(0)
         
+        # FIXED: Ensured the closing parenthesis seals the function parameters perfectly
         st.download_button(
             label="💾 Download High-Res PNG for Editing / On-Air",
             data=img_buf,
             file_name=f"custom_sky_{direction}.png",
             mime="image/png"
-
-            # Completely clear out the figure state to prevent scaling bleed on re-runs
-            plt.close(fig)
         )
+
+        # Completely clear out the figure state to prevent scaling bleed on re-runs
+        plt.close(fig)
