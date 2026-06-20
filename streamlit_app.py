@@ -178,8 +178,9 @@ if st.button("Generate Sky Graphic", type="primary"):
         twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + np.array([25, 55, 105])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
         twilight_sky_matrix = np.clip(twilight_horiz_glow + twilight_upper_sky, 0, 1)
         
-        # Generate the full nighttime matrix plate (dark space navy with a subtle midnight horizon lift)
-        night_sky_matrix = color_space_navy[None, None, :] * v_frac[..., None] + np.array([16, 26, 44])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
+        # FIXED: Lowered the horizon baseline coefficients from [16, 26, 44] down to [11, 17, 30]
+        # to ensure that 11:30 PM plates render a clean, rich midnight dark navy instead of a washed-out slate.
+        night_sky_matrix = color_space_navy[None, None, :] * v_frac[..., None] + np.array([11, 17, 30]) / 255.0 * (1.0 - v_frac[..., None])
         
         # --- 4. MAP THE EARTH'S SHADOW WEDGE & THE BELT OF VENUS ---
         az_diff_rad = np.radians(X_mesh - sun_az_deg)
