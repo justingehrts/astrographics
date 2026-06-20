@@ -114,9 +114,12 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_az_deg = sun_az.degrees
                 
         # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
-        # SOLUTION: Set facecolor="none" to make the outer paper background transparent,
-        # forcing the entire asset container to blend natively into your dashboard web canvas.
-        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, facecolor="none")
+        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100)
+        
+        # FIXED: Turns off the underlying grid axes, ticks, and labels entirely
+        # This stops Matplotlib from carving out margin space for text layout completely.
+        ax.set_axis_off()
+        
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
