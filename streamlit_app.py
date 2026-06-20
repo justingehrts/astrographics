@@ -207,8 +207,14 @@ if st.button("Generate Sky Graphic", type="primary"):
                 if sun_deg > 6.0:
                     pixel_rgb = day_sky_block
                 elif sun_deg > -12.0:
+                    # Widened interpolation bracket
                     raw_factor = np.clip((sun_deg - (-12.0)) / 18.0, 0, 1)
-                    transition_factor = np.power(raw_factor, 1.1)
+                    
+                    # FIXED: Shifted to a cubic power curve (3.5) to keep the daytime blue 
+                    # suppressed while the sun is low, letting the gorgeous golden and orange 
+                    # twilight blocks fully saturate the screen at 8:45 PM.
+                    transition_factor = np.power(raw_factor, 3.5)
+                    
                     pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
                 else:
                     pixel_rgb = night_sky_block
