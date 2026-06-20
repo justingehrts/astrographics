@@ -202,20 +202,15 @@ if st.button("Generate Sky Graphic", type="primary"):
                 else:
                     night_sky_block = local_horiz_rgb * (1.0 - v_frac) + color_night_top * v_frac
                 
-                # ==============================================================
-                # YEAR-ROUND ATMOSPHERIC ILLUMINATION COUPLING
-                # Natively scales the sky based on day_intensity and local 
-                # scattering matrices, removing seasonal clipping entirely.
-                # ==============================================================
-                if sun_deg > 12.0:
-                    # Pure daytime sky profile when the sun is high
-                    pixel_rgb = day_sky_block
-                elif sun_deg > -12.0:
-                    # Smoothly transition from day to twilight using the sun's true intensity
-                    # and your local horizontal scattering calculations
+                # FIXED: Implemented the continuous, year-round transition tree. This uses 
+                # day_intensity and your scattering vectors to dynamically scale twilight across all seasons.
+                if sun_deg > 0:
                     pixel_rgb = local_horiz_rgb * (1.0 - day_intensity) + day_sky_block * day_intensity
+                elif sun_deg > -12.0:
+                    raw_factor = np.clip((sun_deg - (-12.0)) / 12.0, 0, 1)
+                    transition_factor = np.power(raw_factor, 0.8)
+                    pixel_rgb = night_sky_block * (1.0 - transition_factor) + local_horiz_rgb * transition_factor
                 else:
-                    # Pure night profile when the sun drops below astronomical twilight
                     pixel_rgb = night_sky_block
                     
                 bg_image[y_idx, x_idx, :] = np.clip(pixel_rgb, 0, 1)
@@ -411,8 +406,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_yticks(np.arange(0, 41, 10))
         ax.set_yticklabels([f"{int(y)}°" for y in np.arange(0, 41, 10)])
         
-        # FIXED: Removed the active rendering triggers for text labels/tick markers to 
-        # let the container margins cleanly roll up and collapse out of existence natively.
+        # FIXED: Explicitly removed xlabel, ylabel, and tick_params layout declarations 
+        # to guarantee the outer bounding margins collapse edge-to-edge natively.
         for spine in ax.spines.values():
             spine.set_visible(False)
 
