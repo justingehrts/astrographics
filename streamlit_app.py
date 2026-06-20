@@ -113,8 +113,9 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_deg = sun_alt.degrees
         sun_az_deg = sun_az.degrees
                 
-        # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
-        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100)
+        # FIXED: Added layout="tight" to prevent Matplotlib from automatically shrinking 
+        # the sky grid and injecting default white margin buffers when rendering complex geometry.
+        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, layout="tight"))
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
