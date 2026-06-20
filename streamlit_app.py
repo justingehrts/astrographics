@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 import matplotlib
-matplotlib.use("Agg")  # Safe headless execution for cloud servers
+matplotlib.use("Agg")  # Safe headless execution for cloud servers
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.path import Path
