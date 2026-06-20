@@ -114,108 +114,133 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_az_deg = sun_az.degrees
                 
         # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
-        # FIXED: Set facecolor='none' to strip out raw canvas background borders in previews
         fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, facecolor='none')
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
-        # 3. HIGH-FIDELITY SPHERICAL SCATTERING 2D ATMOSPHERIC ENGINE
+        # ======================================================================
+        # SECTION 3: PHYSICAL VECTORIZED PREETHAM SKY MODEL & CIE COLOUR ENGINE
+        # ======================================================================
         x_pixels, y_pixels = 150, 100
         x_space = np.linspace(az_min, az_max, x_pixels)
         y_space = np.linspace(0, 40, y_pixels)
         X_mesh, Y_mesh = np.meshgrid(x_space, y_space)
         
-        # Convert coordinate angles to true radians for 3D vector space mapping
-        rad_az_mesh = np.radians(X_mesh)
-        rad_alt_mesh = np.radians(Y_mesh)
-        rad_sun_az = np.radians(sun_az_deg)
-        rad_sun_alt = np.radians(sun_deg)
+        # Convert degrees to radians for geometric array execution
+        sun_zenith_rad = np.radians(90.0 - sun_deg)
+        sun_az_rad = np.radians(sun_az_deg)
         
-        # Compute exact angular scattering separation matrix across the canvas grid
-        cos_scatter_angle = (np.sin(rad_alt_mesh) * np.sin(rad_sun_alt) + 
-                             np.cos(rad_alt_mesh) * np.cos(rad_sun_alt) * np.cos(rad_az_mesh - rad_sun_az))
-        scatter_angle_deg = np.degrees(np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0)))
+        view_zenith_rad = np.radians(90.0 - Y_mesh)
+        view_az_rad = np.radians(X_mesh)
         
-        # Vectorized calculation of horizontal azimuth offsets across the frame
-        rad_diff_mesh = np.radians(X_mesh - sun_az_deg)
-        h_scatter = np.exp(-((1.0 - np.cos(rad_diff_mesh)) * (180.0 / np.pi) / 85.0)**2)
+        # Compute exact angular scattering angle (gamma) between sun position and pixel
+        cos_gamma = (np.sin(Y_mesh * np.pi / 180.0) * np.sin(sun_deg * np.pi / 180.0) +
+                     np.cos(Y_mesh * np.pi / 180.0) * np.cos(sun_deg * np.pi / 180.0) * np.cos(np.radians(X_mesh - sun_az_deg)))
+        gamma_mesh = np.arccos(np.clip(cos_gamma, -1.0, 1.0))
         
-        # Track continuous shift parameters from daylight down to full midnight dark limits
-        solar_dip = np.clip(abs(sun_deg), 0, 18) if sun_deg <= 0 else 0.0
-        day_intensity = np.clip(sun_deg / 15.0, 0, 1) if sun_deg > 0 else 0.0
+        # Cleanly modulate atmospheric Turbidity (T) based on true solar position
+        # T=2.2 matches a crisp, clear broadcast sky plate.
+        T = 2.2
         
-        # Define high-fidelity atmospheric color profiles
-        color_day_top = np.array([26, 102, 255]) / 255.0      
-        color_day_horiz = np.array([153, 204, 255]) / 255.0    
-        color_twilight_horiz = np.array([212, 138, 59]) / 255.0 
-        color_twilight_mid = np.array([55, 135, 160]) / 255.0     
-        color_night_top = np.array([11, 17, 32]) / 255.0       
-        color_night_horiz = np.array([22, 34, 56]) / 255.0     
+        # Preetham constant mapping matrices for calculation
+        # [A, B, C, D, E] coefficients for Y, x, y tracks respectively
+        coeffs_Y = np.array([0.17872 * T - 1.46303, -0.01925 * T + 0.42749,  0.01669 * T + 5.32505, -0.12117 * T - 2.57705, -0.02266 * T + 0.37027])
+        coeffs_x = np.array([-0.01925 * T - 0.25922, -0.06651 * T + 0.00081, -0.00041 * T + 0.21247, -0.06409 * T - 0.89887, -0.00325 * T + 0.04517])
+        coeffs_y = np.array([-0.01669 * T - 0.26078, -0.01775 * T + 0.00921, -0.00516 * T + 0.21023, -0.04167 * T - 1.65369, -0.01217 * T + 0.05285])
+        
+        def preetham_distribution(v_zenith, gamma, c):
+            cos_v_zenith = np.cos(v_zenith)
+            # Clip cos_v_zenith slightly above 0 to avoid zero-division runtime errors near the true horizon
+            cos_v_zenith = np.where(cos_v_zenith == 0, 1e-4, cos_v_zenith)
+            
+            val = (1.0 + c[0] * np.exp(c[1] / cos_v_zenith)) * (1.0 + c[2] * np.exp(c[3] * gamma) + c[4] * (np.cos(gamma) ** 2))
+            return val
+
+        # Evaluate raw relative distributions across the view canvas
+        dist_Y = preetham_distribution(view_zenith_rad, gamma_mesh, coeffs_Y)
+        dist_x = preetham_distribution(view_zenith_rad, gamma_mesh, coeffs_x)
+        dist_y = preetham_distribution(view_zenith_rad, gamma_mesh, coeffs_y)
+        
+        # Establish absolute normalization anchors based on true solar altitude position
+        # Zeniths resolve daylight levels smoothly down to zero during sunset
+        sun_zenith_clamped = np.clip(sun_zenith_rad, 0, np.pi / 2)
+        
+        Y_zenith = (4.0453 * T - 4.9710) * np.tan((4/9 - T/120)*(np.pi - 2*sun_zenith_clamped)) - 0.2155 * T + 2.4192
+        Y_zenith = max(0.01, Y_zenith) * np.clip((sun_deg + 6.0) / 12.0, 0, 1) # Sane dusk attenuation fade
+        
+        T_mat = np.array([T**2, T, 1.0])
+        x_zenith = np.dot(np.array([[0.00166, -0.02903, 0.11693, -0.19715, 0.31756],
+                                    [-0.00375, 0.06377, -0.21196, 0.25813, -0.01669],
+                                    [0.00208, -0.03202, 0.09342, -0.09053, 0.05167]]), sun_zenith_clamped**np.arange(4, -1, -1))
+        x_zenith = np.dot(T_mat, x_zenith)
+        
+        y_zenith = np.dot(np.array([[0.00272, -0.04577, 0.18014, -0.33404, 0.26733],
+                                    [-0.00614, 0.10017, -0.33241, 0.54714, -0.26462],
+                                    [0.00317, -0.04853, 0.14173, -0.19119, 0.07541]]), sun_zenith_clamped**np.arange(4, -1, -1))
+        y_zenith = np.dot(T_mat, y_zenith)
+        
+        # Absolute normalization scaling execution
+        denom_dist = preetham_distribution(0, sun_zenith_rad, coeffs_Y)
+        denom_dist = 1e-4 if denom_dist == 0 else denom_dist
+        
+        Y_final = Y_zenith * (dist_Y / denom_dist)
+        x_final = x_zenith * (dist_x / preetham_distribution(0, sun_zenith_rad, coeffs_x))
+        x_final = np.where(np.isnan(x_final), 0.3127, x_final) # Safe D65 chromaticity fallback
+        y_final = y_zenith * (dist_y / preetham_distribution(0, sun_zenith_rad, coeffs_y))
+        y_final = np.where(np.isnan(y_final), 0.3290, y_final)
+        
+        # --- STELLARIUM TWILIGHT MODIFICATION LAYER ---
+        # Incorporates Earth's true geometric shadow wedge elevation profile
+        az_diff_rad = np.radians(X_mesh - sun_az_deg)
+        h_shadow = np.degrees(np.arcsin(np.clip(np.sin(np.radians(sun_deg)) * np.cos(az_diff_rad), -1.0, 1.0)))
+        
+        # Render clean atmospheric profiles down into deep nautical twilight bounds
+        if sun_deg <= 2.0:
+            twilight_blend = np.clip((sun_deg + 12.0) / 14.0, 0, 1)
+            
+            # Formulate the soft pink/bronze backscattering track (Belt of Venus)
+            # Centers beautifully right along the emerging shadow boundary edge
+            belt_of_venus = 0.12 * np.exp(-((Y_mesh - (h_shadow + 4.0)) / 3.5)**2) * np.clip((sun_deg + 6.0) / 8.0, 0, 1)
+            belt_of_venus = np.where(h_shadow < 0, belt_of_venus, 0)
+            
+            # Inject deep night-plate color definitions
+            night_base_Y = 0.0015 * (1.0 - twilight_blend)
+            Y_final = Y_final * twilight_blend + night_base_Y
+            x_final = x_final * twilight_blend + 0.22 * (1.0 - twilight_blend) + belt_of_venus * 0.18
+            y_final = y_final * twilight_blend + 0.24 * (1.0 - twilight_blend) + belt_of_venus * 0.08
+            
+        # Ensure y coordinate bounds do not crash the downstream mapping vectors
+        y_final = np.where(y_final == 0, 1e-4, y_final)
+        
+        # --- CLASSIC CIE xyY TO XYZ CONVERSION ---
+        X_cie = (x_final / y_final) * Y_final
+        Y_cie = Y_final
+        Z_cie = ((1.0 - x_final - y_final) / y_final) * Y_final
+        
+        # --- CANONICAL CIE XYZ TO LINEAR sRGB TRANSFORMATION MATRIX ---
+        r_lin =  3.2404542 * X_cie - 1.5371385 * Y_cie - 0.4985314 * Z_cie
+        g_lin = -0.9692660 * X_cie + 1.8760108 * Y_cie + 0.0415560 * Z_cie
+        b_lin =  0.0556434 * X_cie - 0.2040259 * Y_cie + 1.0572252 * Z_cie
+        
+        # --- EXPOSURE CONTROL & DIGITAL BROADARST GRAPHIC GRADINGS ---
+        # Adjust exposure scaling smoothly based on sun tracking positions
+        exposure = 0.55 if sun_deg > 0 else (0.55 + abs(sun_deg) * 0.45)
+        
+        r_exposed = 1.0 - np.exp(-exposure * r_lin)
+        g_exposed = 1.0 - np.exp(-exposure * g_lin)
+        b_exposed = 1.0 - np.exp(-exposure * b_lin)
+        
+        # --- EXPONENTIAL GAMMA ENCODING POWER LAW (2.2) ---
+        r_final = np.where(r_exposed <= 0, 0, r_exposed ** (1.0 / 2.2))
+        g_final = np.where(g_exposed <= 0, 0, g_exposed ** (1.0 / 2.2))
+        b_final = np.where(b_exposed <= 0, 0, b_exposed ** (1.0 / 2.2))
+        
+        # Stack layers into a structured float32 matrix container 
+        bg_image = np.stack([r_final, g_final, b_final], axis=-1)
+        bg_image = np.clip(bg_image, 0.0, 1.0)
         
         grid_color = "#ffffff" if sun_deg > 0 else ("#475569" if sun_deg > -6.0 else "#334155")
         
-        # Initialize structural RGB float matrix array
-        bg_image = np.zeros((y_pixels, x_pixels, 3))
-        
-        # Vectorized generation of the sky color field using localized scatter metrics
-        for y_idx in range(y_pixels):
-            alt_val = y_space[y_idx]
-            v_frac = alt_val / 40.0  
-            
-            for x_idx in range(x_pixels):
-                theta = scatter_angle_deg[y_idx, x_idx]
-                az_val = x_space[x_idx]
-                
-                # Forward scatter controls sunset intensity; backward scatter handles the anti-solar dark dome
-                f_scatter = np.exp(-(theta / 65.0)**2)
-                b_scatter = np.exp(-((180.0 - theta) / 85.0)**2)
-                
-                # Base daylight profile mapping
-                day_horiz = color_day_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter)
-                day_sky_block = day_horiz * (1.0 - v_frac) + color_day_top * v_frac
-                
-                # Calculate local horizontal scattering directly inside the loop
-                rad_diff = np.radians(az_val - sun_az_deg)
-                scat = np.exp(-((1.0 - np.cos(rad_diff)) * (180.0 / np.pi) / 85.0)**2)
-                
-                # Calculate the continuous effective solar dip grid metric
-                effective_dip = solar_dip + (1.0 - scat) * 5.0
-                effective_dip = np.clip(effective_dip, 0, 18)
-                
-                # Safely calculate h_factor using the active effective_dip loop value
-                h_factor = np.clip(effective_dip / 12.0, 0, 1) if sun_deg <= 0 else 0.0
-                
-                twilight_horiz = color_twilight_horiz * (1.0 - h_factor) * scat + color_night_horiz * (1.0 - (1.0 - h_factor) * scat) + (color_twilight_mid * 0.15 * b_scatter * (1.0 - h_factor))
-                local_horiz_rgb = day_sky_block * day_intensity + (1.0 - day_intensity) * twilight_horiz
-                
-                # Evaluate active twilight scattering bands cleanly out to a full 12° solar dip
-                if sun_deg <= 0 and effective_dip < 12.0:
-                    m_factor = np.clip(effective_dip / 12.0, 0, 1)
-                    local_mid_rgb = color_twilight_mid * (1.0 - m_factor) * scat + color_night_horiz * (1.0 - (1.0 - m_factor) * scat)
-                    
-                    if v_frac < 0.30:
-                        h_blend = v_frac / 0.30
-                        night_sky_block = local_horiz_rgb * (1.0 - h_blend) + local_mid_rgb * h_blend
-                    else:
-                        t_blend = (v_frac - 0.30) / 0.70
-                        night_sky_block = local_mid_rgb * (1.0 - t_blend) + color_night_top * t_blend
-                else:
-                    night_sky_block = local_horiz_rgb * (1.0 - v_frac) + color_night_top * v_frac
-                
-                # FIXED ORIGINAL TWILIGHT TREE: Restored your clean, high-contrast mathematical 
-                # transition boundaries. This isolates the upper sky to keep it a deep, crisp blue, 
-                # while allowing the warm peach horizon glow to hold down low without washing out brown.
-                if sun_deg > 2.0:
-                    pixel_rgb = day_sky_block
-                elif sun_deg > -12.0:
-                    raw_factor = np.clip((sun_deg - (-12.0)) / 14.0, 0, 1)
-                    transition_factor = np.power(raw_factor, 1.1)
-                    pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
-                else:
-                    pixel_rgb = night_sky_block
-                    
-                bg_image[y_idx, x_idx, :] = np.clip(pixel_rgb, 0, 1)
-
         # Draw the calculated continuous 2D analytical gradient mesh onto the background plane
         ax.imshow(
             bg_image,
@@ -300,11 +325,9 @@ if st.button("Generate Sky Graphic", type="primary"):
                 
                 pabl_rad = np.arctan2(sun_alt.degrees - moon_alt, sun_az_deg - moon_az)
                 
-                # Base horizontal width in grid degrees
                 r_x = 0.65  
-                r_y = r_x * (12.0 / 90.0) / (6.75 / 40.0) # ~0.7901 aspect compensation factor
+                r_y = r_x * (12.0 / 90.0) / (6.75 / 40.0)
                 
-                # Generate vertices inside a perfectly uniform, symmetrical unit circular space first
                 num_points = 30
                 phi = np.linspace(-np.pi/2, np.pi/2, num_points)
                 
@@ -318,16 +341,13 @@ if st.button("Generate Sky Graphic", type="primary"):
                 cos_p, sin_p = np.cos(pabl_rad), np.sin(pabl_rad)
                 
                 verts = []
-                # 1. Rotate the outer crescent edge inside symmetrical unit circle space first
                 for idx in range(num_points):
                     x_rot = x_outer_unit[idx] * cos_p - y_outer_unit[idx] * sin_p
                     y_rot = x_outer_unit[idx] * sin_p + y_outer_unit[idx] * cos_p
-                    # Map to the stretched graph dimensions last to ensure it remains a perfect circle on air
                     rx = x_rot * r_x
                     ry = y_rot * r_y
                     verts.append((moon_az + rx, moon_alt + ry))
                     
-                # 2. Rotate the internal phase shading terminator edge inside unit space
                 for idx in reversed(range(num_points)):
                     x_rot = x_inner_unit[idx] * cos_p - y_inner_unit[idx] * sin_p
                     y_rot = x_inner_unit[idx] * sin_p + y_inner_unit[idx] * cos_p
@@ -407,8 +427,6 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_yticks(np.arange(0, 41, 10))
         ax.set_yticklabels([f"{int(y)}°" for y in np.arange(0, 41, 10)])
         
-        # FIXED: Explicitly removed xlabel, ylabel, and tick_params layout declarations 
-        # to guarantee the outer bounding margins collapse edge-to-edge natively.
         for spine in ax.spines.values():
             spine.set_visible(False)
 
@@ -420,7 +438,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             img_buf, 
             format="png", 
             dpi=150, 
-            facecolor="none",  # FIXED: Locks background transparency for physical file downloads
+            facecolor="none",  
             edgecolor="none",
             pad_inches=0.0
         )
