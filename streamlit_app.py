@@ -116,13 +116,9 @@ if st.button("Generate Sky Graphic", type="primary"):
         # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
         fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100)
         
-        # LOCKED ABSOLUTE 100% FOOTPRINT: Coordinates [left, bottom, width, height]
-        # This stretches the sky gradient flawlessly to the literal edges of the 16:9 file bounds,
-        # completely starving out the physical space where the outer frame border lives.
+        # FIXED: Forces the actual sky chart to fill 100% of the physical image space.
+        # This completely overwrites the default figure margins, eliminating the border area entirely.
         ax.set_position([0, 0, 1, 1])
-        
-        # Turn off the ticks, grid, and coordinate math markers natively
-        ax.set_axis_off()
         
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
