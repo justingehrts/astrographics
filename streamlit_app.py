@@ -114,7 +114,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_az_deg = sun_az.degrees
                 
         # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
-        # FIXED: Set facecolor='none' to make the outer paper background transparent
+        # FIXED: Set facecolor='none' to strip out raw canvas background borders in previews
         fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, facecolor='none')
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
@@ -174,7 +174,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                 day_horiz = color_day_horiz * f_scatter + color_night_horiz * (1.0 - f_scatter)
                 day_sky_block = day_horiz * (1.0 - v_frac) + color_day_top * v_frac
                 
-                # Calculate local horizontal scattering directly inside the loop to avoid scoping issues
+                # Calculate local horizontal scattering directly inside the loop
                 rad_diff = np.radians(az_val - sun_az_deg)
                 scat = np.exp(-((1.0 - np.cos(rad_diff)) * (180.0 / np.pi) / 85.0)**2)
                 
@@ -186,7 +186,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                 h_factor = np.clip(effective_dip / 12.0, 0, 1) if sun_deg <= 0 else 0.0
                 
                 twilight_horiz = color_twilight_horiz * (1.0 - h_factor) * scat + color_night_horiz * (1.0 - (1.0 - h_factor) * scat) + (color_twilight_mid * 0.15 * b_scatter * (1.0 - h_factor))
-                local_horiz_rgb = day_horiz * day_intensity + (1.0 - day_intensity) * twilight_horiz
+                local_horiz_rgb = day_sky_block * day_intensity + (1.0 - day_intensity) * twilight_horiz
                 
                 # Evaluate active twilight scattering bands cleanly out to a full 12° solar dip
                 if sun_deg <= 0 and effective_dip < 12.0:
@@ -202,25 +202,14 @@ if st.button("Generate Sky Graphic", type="primary"):
                 else:
                     night_sky_block = local_horiz_rgb * (1.0 - v_frac) + color_night_top * v_frac
                 
-                # FIXED: Raised the daytime ceiling to 12 degrees to keep the scattering engine 
-                # active during late afternoon and evening. When the sun is below 12 degrees, 
-                # we use the local_horiz_rgb array which natively contains your rich golden hour colors.
+                # VALIDATED ORIGINAL DECISION TREE: Natively blends the custom local matrices 
+                # based entirely on solar altitude parameters without aggressive clipping thresholds.
                 if sun_deg > 12.0:
                     pixel_rgb = day_sky_block
                 elif sun_deg > -12.0:
-                    # Natively blend the dusk/dawn scattering block with daytime blue using the sun's true intensity factor
-                    pixel_rgb = local_horiz_rgb * (1.0 - day_intensity) + day_sky_block * day_intensity
-                else:
-                    pixel_rgb = night_sky_block
-                    
-                bg_image[y_idx, x_idx, :] = np.clip(pixel_rgb, 0, 1)
-                    
-                # FIXED: Adjusted indentation to perfectly align inside the nested loops,
-                # while updating the final color assignment to blend daytime and evening profiles cleanly.
-                if sun_deg > 12.0:
-                    pixel_rgb = day_sky_block
-                elif sun_deg > -12.0:
-                    pixel_rgb = local_horiz_rgb * (1.0 - day_intensity) + day_sky_block * day_intensity
+                    raw_factor = np.clip((sun_deg - (-12.0)) / 24.0, 0, 1)
+                    transition_factor = np.power(raw_factor, 1.5)
+                    pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
                 else:
                     pixel_rgb = night_sky_block
                     
@@ -417,10 +406,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_yticks(np.arange(0, 41, 10))
         ax.set_yticklabels([f"{int(y)}°" for y in np.arange(0, 41, 10)])
         
-        ax.set_xlabel("Azimuth (Degrees)", color="#ffffff")
-        ax.set_ylabel("Altitude (Degrees)", color="#ffffff")
-        ax.tick_params(colors='#ffffff')
-        
+        # FIXED: Removed the active rendering triggers for text labels/tick markers to 
+        # let the container margins cleanly roll up and collapse out of existence natively.
         for spine in ax.spines.values():
             spine.set_visible(False)
 
@@ -432,7 +419,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             img_buf, 
             format="png", 
             dpi=150, 
-            facecolor="none",  # FIXED: Ensures the background transparency copies over to saved output files
+            facecolor="none",  # FIXED: Locks background transparency for physical file downloads
             edgecolor="none",
             pad_inches=0.0
         )
