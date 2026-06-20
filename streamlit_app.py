@@ -113,9 +113,10 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_deg = sun_alt.degrees
         sun_az_deg = sun_az.degrees
                 
-        # FIXED: Added layout="tight" to prevent Matplotlib from automatically shrinking 
-        # the sky grid and injecting default white margin buffers when rendering complex geometry.
-        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, layout="tight")
+        # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
+        # SOLUTION: Set facecolor="none" to make the outer paper background transparent,
+        # forcing the entire asset container to blend natively into your dashboard web canvas.
+        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, facecolor="none")
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
