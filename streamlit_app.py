@@ -215,12 +215,12 @@ if st.button("Generate Sky Graphic", type="primary"):
                     
                 bg_image[y_idx, x_idx, :] = np.clip(pixel_rgb, 0, 1)
                     
-                    # FIXED: Shifted to a cubic power curve (3.5) to keep the daytime blue 
-                    # suppressed while the sun is low, letting the gorgeous golden and orange 
-                    # twilight blocks fully saturate the screen at 8:45 PM.
-                    transition_factor = np.power(raw_factor, 3.5)
-                    
-                    pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
+                # FIXED: Adjusted indentation to perfectly align inside the nested loops,
+                # while updating the final color assignment to blend daytime and evening profiles cleanly.
+                if sun_deg > 12.0:
+                    pixel_rgb = day_sky_block
+                elif sun_deg > -12.0:
+                    pixel_rgb = local_horiz_rgb * (1.0 - day_intensity) + day_sky_block * day_intensity
                 else:
                     pixel_rgb = night_sky_block
                     
