@@ -413,14 +413,18 @@ if st.button("Generate Sky Graphic", type="primary"):
         # --- DISPLAY & DOWNLOAD ---
         st.pyplot(fig)
         
+        # --- DISPLAY & DOWNLOAD ---
+        st.pyplot(fig)
+        
         img_buf = io.BytesIO()
         fig.savefig(
             img_buf, 
             format="png", 
             dpi=150, 
-            facecolor="none", 
+            facecolor=fig.get_facecolor(), # Matches background canvas tone seamlessly
             edgecolor="none",
-            pad_inches=0.0
+            bbox_inches="tight",           # FIXED: Automatically crops away empty exterior margins
+            pad_inches=0.0                 # FIXED: Sets the padding threshold strictly to zero pixels
         )
         img_buf.seek(0)
         
