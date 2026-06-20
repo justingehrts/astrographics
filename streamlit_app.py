@@ -300,7 +300,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                 r_x = 0.65  
                 r_y = r_x * (12.0 / 90.0) / (6.75 / 40.0) # ~0.7901 aspect compensation factor
                 
-                # FIXED: Generate vertices inside a perfectly uniform, symmetrical unit circular space first
+                # Generate vertices inside a perfectly uniform, symmetrical unit circular space first
                 num_points = 30
                 phi = np.linspace(-np.pi/2, np.pi/2, num_points)
                 
@@ -386,7 +386,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                     except Exception:
                         continue
 
-# 6. FIXED SUBURBAN TREE HORIZON SILHOUETTE
+        # 6. FIXED SUBURBAN TREE HORIZON SILHOUETTE
         x_silhouette_space = np.linspace(az_min, az_max, 400)
         base_ground = 4.0 + 1.0 * np.sin(x_silhouette_space / 5)
         tree_canopy = 1.2 * np.sin(x_silhouette_space * 2.5) * np.cos(x_silhouette_space * 0.4)
@@ -410,31 +410,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        # --- DISPLAY & DOWNLOAD ---
+        # --- DISPLAY DIRECT TO SCREEN ---
         st.pyplot(fig)
-        
-        # --- DISPLAY & DOWNLOAD ---
-        st.pyplot(fig)
-        
-        img_buf = io.BytesIO()
-        fig.savefig(
-            img_buf, 
-            format="png", 
-            dpi=150, 
-            facecolor=fig.get_facecolor(), # Matches background canvas tone seamlessly
-            edgecolor="none",
-            bbox_inches="tight",           # FIXED: Automatically crops away empty exterior margins
-            pad_inches=0.0                 # FIXED: Sets the padding threshold strictly to zero pixels
-        )
-        img_buf.seek(0)
-        
-        # FIXED: Ensured the closing parenthesis seals the function parameters perfectly
-        st.download_button(
-            label="💾 Download High-Res PNG for Editing / On-Air",
-            data=img_buf,
-            file_name=f"custom_sky_{direction}.png",
-            mime="image/png"
-        )
 
         # Completely clear out the figure state to prevent scaling bleed on re-runs
         plt.close(fig)
