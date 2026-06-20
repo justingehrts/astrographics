@@ -203,9 +203,11 @@ if st.button("Generate Sky Graphic", type="primary"):
             fade_twilight_to_night = np.clip((sun_deg + 8.0) / 8.0, 0, 1)
             bg_image = twilight_sky_matrix * fade_twilight_to_night + night_sky_matrix * (1.0 - fade_twilight_to_night)
             
-        # Apply eye-adaptation tone mapping and exponential standard 2.2 gamma encoding
-        bg_image = np.clip(bg_image, 0.0, 1.0)
-        bg_image = bg_image ** (1.0 / 2.0)  # Soft contrast gamma mapping
+        # FIXED: Scale the gamma mapping dynamically based on solar altitude.
+        # Uses standard 1/2.0 scaling for daytime clarity, but transitions to a deep, 
+        # high-contrast 1/1.0 linear curve at night to preserve pure broadcast black levels.
+        gamma_exponent = 2.0 if sun_deg > 0 else np.clip(2.0 + (sun_deg / 6.0), 1.0, 2.0)
+        bg_image = np.clip(bg_image, 0.0, 1.0) ** (1.0 / gamma_exponent)
         
         grid_color = "#ffffff" if sun_deg > 0 else ("#475569" if sun_deg > -6.0 else "#334155")
 
