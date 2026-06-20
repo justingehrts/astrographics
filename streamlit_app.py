@@ -202,13 +202,18 @@ if st.button("Generate Sky Graphic", type="primary"):
                 else:
                     night_sky_block = local_horiz_rgb * (1.0 - v_frac) + color_night_top * v_frac
                 
-                # FIXED: Widened the interpolation bracket to smoothly map the gradient shift
-                # while the sun is still low or barely hanging onto the horizon.
-                if sun_deg > 6.0:
+                # FIXED: Raised the daytime ceiling to 12 degrees to keep the scattering engine 
+                # active during late afternoon and evening. When the sun is below 12 degrees, 
+                # we use the local_horiz_rgb array which natively contains your rich golden hour colors.
+                if sun_deg > 12.0:
                     pixel_rgb = day_sky_block
                 elif sun_deg > -12.0:
-                    # Widened interpolation bracket
-                    raw_factor = np.clip((sun_deg - (-12.0)) / 18.0, 0, 1)
+                    # Natively blend the dusk/dawn scattering block with daytime blue using the sun's true intensity factor
+                    pixel_rgb = local_horiz_rgb * (1.0 - day_intensity) + day_sky_block * day_intensity
+                else:
+                    pixel_rgb = night_sky_block
+                    
+                bg_image[y_idx, x_idx, :] = np.clip(pixel_rgb, 0, 1)
                     
                     # FIXED: Shifted to a cubic power curve (3.5) to keep the daytime blue 
                     # suppressed while the sun is low, letting the gorgeous golden and orange 
