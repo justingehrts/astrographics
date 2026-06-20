@@ -95,6 +95,10 @@ az_min, az_max = az_map[direction]
 if st.button("Generate Sky Graphic", type="primary"):
     with st.spinner("Computing high-fidelity directional sky model and celestial structures..."):
         
+        # FIXED: Forces Matplotlib to completely wipe out any cached layout/padding modifications
+        # from previous sessions and run on a totally clean slate.
+        plt.rcdefaults()
+        
         # Combine inputs into a localized datetime object
         dt_local = datetime.combine(obs_date, obs_time, tzinfo=ZoneInfo(selected_tz))
         dt_utc = dt_local.astimezone(ZoneInfo("UTC"))
