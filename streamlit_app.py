@@ -114,17 +114,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_az_deg = sun_az.degrees
                 
         # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
-        # FIXED: Set facecolor to 'none' so any outer margin padding is 100% transparent
+        # FIXED: Set facecolor='none' to make the outer paper background transparent
         fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, facecolor='none')
-        
-        # LOCKED ABSOLUTE 100% FOOTPRINT: Coordinates [left, bottom, width, height]
-        # This stretches the sky gradient flawlessly to the literal edges of the 16:9 file bounds,
-        # completely starving out the physical space where the outer frame border lives.
-        ax.set_position([0, 0, 1, 1])
-        
-        # Turn off the ticks, grid, and coordinate math markers natively
-        ax.set_axis_off()
-        
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
@@ -211,10 +202,12 @@ if st.button("Generate Sky Graphic", type="primary"):
                 else:
                     night_sky_block = local_horiz_rgb * (1.0 - v_frac) + color_night_top * v_frac
                 
-                if sun_deg > 2.0:
+                # FIXED: Widened the interpolation bracket to smoothly map the gradient shift
+                # while the sun is still low or barely hanging onto the horizon.
+                if sun_deg > 6.0:
                     pixel_rgb = day_sky_block
                 elif sun_deg > -12.0:
-                    raw_factor = np.clip((sun_deg - (-12.0)) / 14.0, 0, 1)
+                    raw_factor = np.clip((sun_deg - (-12.0)) / 18.0, 0, 1)
                     transition_factor = np.power(raw_factor, 1.1)
                     pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
                 else:
@@ -396,7 +389,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                     except Exception:
                         continue
 
-# 6. FIXED SUBURBAN TREE HORIZON SILHOUETTE
+        # 6. FIXED SUBURBAN TREE HORIZON SILHOUETTE
         x_silhouette_space = np.linspace(az_min, az_max, 400)
         base_ground = 4.0 + 1.0 * np.sin(x_silhouette_space / 5)
         tree_canopy = 1.2 * np.sin(x_silhouette_space * 2.5) * np.cos(x_silhouette_space * 0.4)
@@ -428,13 +421,12 @@ if st.button("Generate Sky Graphic", type="primary"):
             img_buf, 
             format="png", 
             dpi=150, 
-            facecolor="none",  # FIXED: Keeps the outer canvas transparent on file export
+            facecolor="none",  # FIXED: Ensures the background transparency copies over to saved output files
             edgecolor="none",
             pad_inches=0.0
         )
         img_buf.seek(0)
         
-        # FIXED: Ensured the closing parenthesis seals the function parameters perfectly
         st.download_button(
             label="💾 Download High-Res PNG for Editing / On-Air",
             data=img_buf,
