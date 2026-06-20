@@ -202,14 +202,15 @@ if st.button("Generate Sky Graphic", type="primary"):
                 else:
                     night_sky_block = local_horiz_rgb * (1.0 - v_frac) + color_night_top * v_frac
                 
-                # FIXED: Implemented the continuous, year-round transition tree. This uses 
-                # day_intensity and your scattering vectors to dynamically scale twilight across all seasons.
-                if sun_deg > 0:
-                    pixel_rgb = local_horiz_rgb * (1.0 - day_intensity) + day_sky_block * day_intensity
+                # FIXED ORIGINAL TWILIGHT TREE: Restored your clean, high-contrast mathematical 
+                # transition boundaries. This isolates the upper sky to keep it a deep, crisp blue, 
+                # while allowing the warm peach horizon glow to hold down low without washing out brown.
+                if sun_deg > 2.0:
+                    pixel_rgb = day_sky_block
                 elif sun_deg > -12.0:
-                    raw_factor = np.clip((sun_deg - (-12.0)) / 12.0, 0, 1)
-                    transition_factor = np.power(raw_factor, 0.8)
-                    pixel_rgb = night_sky_block * (1.0 - transition_factor) + local_horiz_rgb * transition_factor
+                    raw_factor = np.clip((sun_deg - (-12.0)) / 14.0, 0, 1)
+                    transition_factor = np.power(raw_factor, 1.1)
+                    pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
                 else:
                     pixel_rgb = night_sky_block
                     
