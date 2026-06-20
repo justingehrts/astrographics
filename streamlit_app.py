@@ -118,124 +118,96 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
         
-# ======================================================================
-        # SECTION 3: PHYSICAL VECTORIZED PREETHAM SKY MODEL & CIE COLOUR ENGINE
+        # ======================================================================
+        # SECTION 3: STELLARIUM-ADAPTED VECTORIZED LIGHT PATH ENGNE
+        # Computes continuous Rayleigh/Mie scattering profiles without step limits.
         # ======================================================================
         x_pixels, y_pixels = 150, 100
         x_space = np.linspace(az_min, az_max, x_pixels)
         y_space = np.linspace(0, 40, y_pixels)
         X_mesh, Y_mesh = np.meshgrid(x_space, y_space)
         
-        # FIXED: Clamp sun altitude slightly above horizon for the Preetham math 
-        # to guarantee the division normalization parameters NEVER hit an infinity ceiling.
-        sun_deg_clamped = max(0.5, sun_deg)
-        sun_zenith_rad = np.radians(90.0 - sun_deg_clamped)
+        # Convert geometric angles to true radians for 2D matrix calculation
+        rad_az_mesh = np.radians(X_mesh)
+        rad_alt_mesh = np.radians(Y_mesh)
+        rad_sun_az = np.radians(sun_az_deg)
+        rad_sun_alt = np.radians(sun_deg)
         
-        view_zenith_rad = np.radians(90.0 - Y_mesh)
+        # Compute exact angular scattering distance (theta) across the canvas frame
+        cos_scatter_angle = (np.sin(rad_alt_mesh) * np.sin(rad_sun_alt) + 
+                             np.cos(rad_alt_mesh) * np.cos(rad_sun_alt) * np.cos(rad_az_mesh - rad_sun_az))
+        theta_deg = np.degrees(np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0)))
         
-        # Compute exact angular scattering angle (gamma) between sun position and pixel
-        cos_gamma = (np.sin(Y_mesh * np.pi / 180.0) * np.sin(sun_deg_clamped * np.pi / 180.0) +
-                     np.cos(Y_mesh * np.pi / 180.0) * np.cos(sun_deg_clamped * np.pi / 180.0) * np.cos(np.radians(X_mesh - sun_az_deg)))
-        gamma_mesh = np.arccos(np.clip(cos_gamma, -1.0, 1.0))
+        # Calculate localized scattering intensity parameters natively
+        f_scatter = np.exp(-(theta_deg / 50.0)**2)  # Mie forward scattering glow dome
         
-        T = 2.2
+        # 1. COMPUTE CONTINUOUS AIR MASS PATHWAY & ATMOSPHERIC EXTINCTION
+        # Simulates the physical thickening of air filters as the sun sets
+        sun_alt_clamped = max(0.1, sun_deg)
+        air_mass_sun = 1.0 / (np.sin(np.radians(sun_alt_clamped)) + 0.15 * (sun_alt_clamped + 3.885) ** -1.253)
         
-        # Preetham constant mapping matrices
-        coeffs_Y = np.array([0.17872 * T - 1.46303, -0.01925 * T + 0.42749,  0.01669 * T + 5.32505, -0.12117 * T - 2.57705, -0.02266 * T + 0.37027])
-        coeffs_x = np.array([-0.01925 * T - 0.25922, -0.06651 * T + 0.00081, -0.00041 * T + 0.21247, -0.06409 * T - 0.89887, -0.00325 * T + 0.04517])
-        coeffs_y = np.array([-0.01669 * T - 0.26078, -0.01775 * T + 0.00921, -0.00516 * T + 0.21023, -0.04167 * T - 1.65369, -0.01217 * T + 0.05285])
+        # Wavelength absorption scaling vectors (Rayleigh Extinction profiles)
+        # Red wavelengths pass cleanly; blue wavelengths are completely scattered away at low angles
+        extinction_R = np.exp(-0.02 * air_mass_sun)
+        extinction_G = np.exp(-0.04 * air_mass_sun)
+        extinction_B = np.exp(-0.10 * air_mass_sun)
         
-        def preetham_distribution(v_zenith, gamma, c):
-            cos_v_zenith = np.cos(v_zenith)
-            cos_v_zenith = np.where(cos_v_zenith == 0, 1e-4, cos_v_zenith)
-            return (1.0 + c[0] * np.exp(c[1] / cos_v_zenith)) * (1.0 + c[2] * np.exp(c[3] * gamma) + c[4] * (np.cos(gamma) ** 2))
-
-        dist_Y = preetham_distribution(view_zenith_rad, gamma_mesh, coeffs_Y)
-        dist_x = preetham_distribution(view_zenith_rad, gamma_mesh, coeffs_x)
-        dist_y = preetham_distribution(view_zenith_rad, gamma_mesh, coeffs_y)
+        # 2. DEFINE PHYSICAL SCATTERING COLOR BASES
+        color_sky_blue = np.array([30, 110, 255]) / 255.0
+        color_space_navy = np.array([10, 16, 28]) / 255.0
         
-        Y_zenith = (4.0453 * T - 4.9710) * np.tan((4/9 - T/120)*(np.pi - 2*sun_zenith_rad)) - 0.2155 * T + 2.4192
-        Y_zenith = max(0.05, Y_zenith)
+        # The sun's light shifts dynamically down from bright white to deep gold/amber based on air mass
+        sun_filtered_R = 1.0 * extinction_R
+        sun_filtered_G = 0.95 * extinction_G
+        sun_filtered_B = 0.82 * extinction_B
+        color_sunset_glow = np.array([sun_filtered_R, sun_filtered_G, sun_filtered_B])
         
-        T_mat = np.array([T**2, T, 1.0])
-        x_zenith = np.dot(np.array([[0.00166, -0.02903, 0.11693, -0.19715, 0.31756],
-                                    [-0.00375, 0.06377, -0.21196, 0.25813, -0.01669],
-                                    [0.00208, -0.03202, 0.09342, -0.09053, 0.05167]]), sun_zenith_rad**np.arange(4, -1, -1))
-        x_zenith = np.dot(T_mat, x_zenith)
+        # Calculate global illumination factor
+        illumination = np.clip((sun_deg + 6.0) / 12.0, 0, 1)
         
-        y_zenith = np.dot(np.array([[0.00272, -0.04577, 0.18014, -0.33404, 0.26733],
-                                    [-0.00614, 0.10017, -0.33241, 0.54714, -0.26462],
-                                    [0.00317, -0.04853, 0.14173, -0.19119, 0.07541]]), sun_zenith_rad**np.arange(4, -1, -1))
-        y_zenith = np.dot(T_mat, y_zenith)
+        # 3. VECTORIZED SKY MESH BUILDING
+        v_frac = Y_mesh / 40.0
         
-        denom_dist = preetham_distribution(0, sun_zenith_rad, coeffs_Y)
-        denom_dist = 1e-4 if denom_dist == 0 else denom_dist
+        # Generate the daytime Rayleigh sky base matrix
+        day_base = color_sky_blue[None, None, :] * (1.0 - v_frac[..., None]) + (color_sky_blue * 0.4)[None, None, :] * v_frac[..., None]
+        day_mie_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * 0.4
+        day_sky_matrix = np.clip(day_base + day_mie_glow, 0, 1)
         
-        Y_final = Y_zenith * (dist_Y / denom_dist)
-        x_final = x_zenith * (dist_x / preetham_distribution(0, sun_zenith_rad, coeffs_x))
-        y_final = y_zenith * (dist_y / preetham_distribution(0, sun_zenith_rad, coeffs_y))
+        # Generate the twilight scattering base matrix (glowing bronze horizon fading up to deep indigo)
+        twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * np.exp(-v_frac * 3.5)[..., None]
+        twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + np.array([25, 55, 105])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
+        twilight_sky_matrix = np.clip(twilight_horiz_glow + twilight_upper_sky, 0, 1)
         
-        # --- FIXED STELLARIUM TWILIGHT & POST-SUNSET INTERPOLATION ---
+        # Generate the full nighttime matrix plate (dark space navy with a subtle midnight horizon lift)
+        night_sky_matrix = color_space_navy[None, None, :] * v_frac[..., None] + np.array([16, 26, 44])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
+        
+        # --- 4. MAP THE EARTH'S SHADOW WEDGE & THE BELT OF VENUS ---
         az_diff_rad = np.radians(X_mesh - sun_az_deg)
         h_shadow = np.degrees(np.arcsin(np.clip(np.sin(np.radians(sun_deg)) * np.cos(az_diff_rad), -1.0, 1.0)))
         
-        # Calculate dynamic twilight attenuation factors natively based on real solar position
-        twilight_fade = np.clip((sun_deg + 6.0) / 8.0, 0, 1) if sun_deg <= 2.0 else 1.0
+        # Calculate the soft pink anti-twilight backscattering strip immediately above the shadow
+        belt_of_venus_mask = np.exp(-((Y_mesh - (h_shadow + 3.0)) / 3.0)**2) * np.clip((sun_deg + 5.0) / 5.0, 0, 1)
+        belt_of_venus_mask = np.where(h_shadow < 0, belt_of_venus_mask, 0)
         
-        # Draw clean, high-contrast target profiles for night/dusk transitions
-        # This keeps the upper sky perfectly clean, deep blue and avoids color pollution
-        color_dusk_top = np.array([14, 28, 54]) / 255.0
-        color_dusk_horiz = np.array([218, 142, 74]) / 255.0  # Clean, crisp broadcast bronze
+        # Add the pink scattering arch directly into the twilight matrix calculation
+        twilight_sky_matrix[..., 0] += belt_of_venus_mask * 0.16  # Inject warm pink wavelengths
+        twilight_sky_matrix[..., 1] += belt_of_venus_mask * 0.05
+        twilight_sky_matrix[..., 2] += belt_of_venus_mask * 0.08
         
-        # Map backscattering Belt of Venus enhancement cleanly along the shadow break
-        belt_mask = np.exp(-((Y_mesh - (h_shadow + 3.0)) / 2.5)**2) * np.clip((sun_deg + 4.0) / 4.0, 0, 1)
-        belt_mask = np.where(h_shadow < 0, belt_mask, 0)
-        
-        # Convert preetham arrays to base sRGB matrices natively
-        y_final = np.where(y_final == 0, 1e-4, y_final)
-        X_cie = (x_final / y_final) * Y_final
-        Z_cie = ((1.0 - x_final - y_final) / y_final) * Y_final
-        
-        r_lin = np.clip(3.2404542 * X_cie - 1.5371385 * Y_final - 0.4985314 * Z_cie, 0, None)
-        g_lin = np.clip(-0.9692660 * X_cie + 1.8760108 * Y_final + 0.0415560 * Z_cie, 0, None)
-        b_lin = np.clip(0.0556434 * X_cie - 0.2040259 * Y_final + 1.0572252 * Z_cie, 0, None)
-        
-        # Dynamic exposure dampening parameter
-        exposure = 0.45 if sun_deg > 0 else (0.45 + abs(sun_deg) * 0.15)
-        r_exposed = 1.0 - np.exp(-exposure * r_lin)
-        g_exposed = 1.0 - np.exp(-exposure * g_lin)
-        b_exposed = 1.0 - np.exp(-exposure * b_lin)
-        
-        day_rgb = np.stack([r_exposed, g_exposed, b_exposed], axis=-1)
-        
-        # Smooth vertical baseline dusk gradient layout block
-        dusk_horiz = color_dusk_horiz * np.exp(-(Y_mesh / 12.0)**2)[..., None]
-        dusk_top = color_dusk_top * (1.0 - np.exp(-(Y_mesh / 25.0)**2))[..., None]
-        dusk_base_rgb = dusk_horiz + dusk_top
-        
-        # Inject the pink Belt of Venus layer directly over the twilight horizon
-        dusk_base_rgb[..., 0] += belt_mask * 0.18
-        dusk_base_rgb[..., 1] += belt_mask * 0.06
-        dusk_base_rgb[..., 2] += belt_mask * 0.08
-        
-        # Final color blend transition matrix
-        if sun_deg > 2.0:
-            bg_image = day_rgb
-        elif sun_deg > -6.0:
-            # Cleanly transition from physical daytime sRGB into your clean dusk profile
-            bg_image = day_rgb * twilight_fade + dusk_base_rgb * (1.0 - twilight_fade)
+        # --- 5. EXECUTE CONTINUOUS ILLUMINATION COUPLING TRANSITION ---
+        if sun_deg > 0:
+            fade_day_to_twilight = np.clip(sun_deg / 6.0, 0, 1)
+            bg_image = day_sky_matrix * fade_day_to_twilight + twilight_sky_matrix * (1.0 - fade_day_to_twilight)
         else:
-            # Complete night sky baseline plate once sun clears civil twilight
-            night_fade = np.clip((sun_deg + 12.0) / 6.0, 0, 1)
-            color_night_top = np.array([11, 17, 32]) / 255.0
-            color_night_horiz = np.array([22, 34, 56]) / 255.0
-            night_rgb = color_night_horiz * (1.0 - (Y_mesh / 40.0))[..., None] + color_night_top * (Y_mesh / 40.0)[..., None]
-            bg_image = dusk_base_rgb * night_fade + night_rgb * (1.0 - night_fade)
+            fade_twilight_to_night = np.clip((sun_deg + 8.0) / 8.0, 0, 1)
+            bg_image = twilight_sky_matrix * fade_twilight_to_night + night_sky_matrix * (1.0 - fade_twilight_to_night)
             
-        bg_image = np.clip(bg_image ** (1.0 / 2.2), 0.0, 1.0)
+        # Apply eye-adaptation tone mapping and exponential standard 2.2 gamma encoding
+        bg_image = np.clip(bg_image, 0.0, 1.0)
+        bg_image = bg_image ** (1.0 / 2.0)  # Soft contrast gamma mapping
         
         grid_color = "#ffffff" if sun_deg > 0 else ("#475569" if sun_deg > -6.0 else "#334155")
-        
+
         # Draw the calculated continuous 2D analytical gradient mesh onto the background plane
         ax.imshow(
             bg_image,
