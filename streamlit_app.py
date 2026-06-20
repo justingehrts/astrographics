@@ -202,15 +202,20 @@ if st.button("Generate Sky Graphic", type="primary"):
                 else:
                     night_sky_block = local_horiz_rgb * (1.0 - v_frac) + color_night_top * v_frac
                 
-                # VALIDATED ORIGINAL DECISION TREE: Natively blends the custom local matrices 
-                # based entirely on solar altitude parameters without aggressive clipping thresholds.
+                # ==============================================================
+                # YEAR-ROUND ATMOSPHERIC ILLUMINATION COUPLING
+                # Natively scales the sky based on day_intensity and local 
+                # scattering matrices, removing seasonal clipping entirely.
+                # ==============================================================
                 if sun_deg > 12.0:
+                    # Pure daytime sky profile when the sun is high
                     pixel_rgb = day_sky_block
                 elif sun_deg > -12.0:
-                    raw_factor = np.clip((sun_deg - (-12.0)) / 24.0, 0, 1)
-                    transition_factor = np.power(raw_factor, 1.5)
-                    pixel_rgb = night_sky_block * (1.0 - transition_factor) + day_sky_block * transition_factor
+                    # Smoothly transition from day to twilight using the sun's true intensity
+                    # and your local horizontal scattering calculations
+                    pixel_rgb = local_horiz_rgb * (1.0 - day_intensity) + day_sky_block * day_intensity
                 else:
+                    # Pure night profile when the sun drops below astronomical twilight
                     pixel_rgb = night_sky_block
                     
                 bg_image[y_idx, x_idx, :] = np.clip(pixel_rgb, 0, 1)
