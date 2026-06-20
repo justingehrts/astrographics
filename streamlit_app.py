@@ -114,7 +114,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_az_deg = sun_az.degrees
                 
         # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
-        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100)
+        # SOLUTION: Set frameon=False to completely drop the outer figure container frame borders.
+        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, frameon=False)
         
         # FIXED: Turns off the underlying grid axes, ticks, and labels entirely
         # This stops Matplotlib from carving out margin space for text layout completely.
