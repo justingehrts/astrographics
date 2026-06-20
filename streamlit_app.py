@@ -114,11 +114,14 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_az_deg = sun_az.degrees
                 
         # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
-        # SOLUTION: Set frameon=False to completely drop the outer figure container frame borders.
-        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, frameon=False)
+        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100)
         
-        # FIXED: Turns off the underlying grid axes, ticks, and labels entirely
-        # This stops Matplotlib from carving out margin space for text layout completely.
+        # LOCKED ABSOLUTE 100% FOOTPRINT: Coordinates [left, bottom, width, height]
+        # This stretches the sky gradient flawlessly to the literal edges of the 16:9 file bounds,
+        # completely starving out the physical space where the outer frame border lives.
+        ax.set_position([0, 0, 1, 1])
+        
+        # Turn off the ticks, grid, and coordinate math markers natively
         ax.set_axis_off()
         
         ax.set_xlim(az_min, az_max)
