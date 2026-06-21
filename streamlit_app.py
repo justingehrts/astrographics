@@ -398,10 +398,15 @@ if st.button("Generate Sky Graphic", type="primary"):
         # Clean up gridline decorations and formatting
         ax.grid(True, color=grid_color, alpha=0.15, linestyle='--', zorder=2)
         
-        # LOCKED FIXED 10-DEGREE SPACING WITH CRISP LABELS
+        # LOCKED FIXED 10-DEGREE SPACING WITH ALL LABELS FORCEFULLY HIDDEN
+        ax.set_xticks(np.arange(az_min, az_max + 1, 10))
         ax.set_yticks(np.arange(0, 41, 10))
-        ax.set_yticklabels([f"{int(y)}°" for y in np.arange(0, 41, 10)])
         
+        # FORCE BOTH AXES TO HIDE ALL TICK TEXT AND NUMBER LABELS NATIVELY
+        ax.get_xaxis().set_visible(False)
+        ax.get_yaxis().set_visible(False)
+        
+        # Strip out the spine borders to collapse bounding margins edge-to-edge
         for spine in ax.spines.values():
             spine.set_visible(False)
 
