@@ -48,9 +48,29 @@ obs_time = st.sidebar.selectbox(
 tz_options = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"]
 selected_tz = st.sidebar.selectbox("Time Zone", tz_options, index=0)
 
-# Location Input (Defaults to Central Ohio)
-lat = st.sidebar.number_input("Latitude", value=39.96, step=0.01, format="%.2f")
-lon = st.sidebar.number_input("Longitude", value=-83.00, step=0.01, format="%.2f")
+# ======================================================================
+# URL QUERY PARAMETER ENGINE
+# Reads the URL state to dynamically set defaults, improving user bookmarking.
+# ======================================================================
+# 1. Look for 'lat' in the URL string; default to 39.96 (Columbus) if missing or invalid
+try:
+    url_lat = float(st.query_params.get("lat", 39.96))
+except ValueError:
+    url_lat = 39.96
+
+# 2. Look for 'lon' in the URL string; default to -83.00 if missing or invalid
+try:
+    url_lon = float(st.query_params.get("lon", -83.00))
+except ValueError:
+    url_lon = -83.00
+
+# 3. Pass the URL variables as the sticky default values for the inputs
+lat = st.sidebar.number_input("Latitude", value=url_lat, step=0.01, format="%.2f")
+lon = st.sidebar.number_input("Longitude", value=url_lon, step=0.01, format="%.2f")
+
+# 4. Push the values back to the browser URL dynamically if the user updates them manually
+st.query_params["lat"] = f"{lat:.2f}"
+st.query_params["lon"] = f"{lon:.2f}"
 
 st.sidebar.header("2. View Window")
 direction = st.sidebar.selectbox(
