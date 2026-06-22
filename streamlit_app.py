@@ -49,8 +49,8 @@ tz_options = ["America/New_York", "America/Chicago", "America/Denver", "America/
 selected_tz = st.sidebar.selectbox("Time Zone", tz_options, index=0)
 
 # Location Input (Defaults to Central Ohio)
-lat = st.sidebar.number_input("Latitude", value=40.00, step=0.01, format="%.2f")
-lon = st.sidebar.number_input("Longitude", value=-83.10, step=0.01, format="%.2f")
+lat = st.sidebar.number_input("Latitude", value=39.96, step=0.01, format="%.2f")
+lon = st.sidebar.number_input("Longitude", value=-83.00, step=0.01, format="%.2f")
 
 st.sidebar.header("2. View Window")
 direction = st.sidebar.selectbox(
