@@ -220,18 +220,18 @@ if st.button("Generate Sky Graphic", type="primary"):
             fade_day_to_twilight = np.clip(sun_deg / 6.0, 0, 1)
             bg_image = day_sky_matrix * fade_day_to_twilight + twilight_sky_matrix * (1.0 - fade_day_to_twilight)
         else:
-            # FIXED: Extended the twilight fade out to -12.0 degrees so the deep 
-            # indigo and faint horizon tones linger organically through nautical twilight.
-            fade_twilight_to_night = np.clip((sun_deg + 12.0) / 12.0, 0, 1)
+            # FIXED: Applied a non-linear power curve (0.6) to keep the twilight matrix 
+            # highly dominant during civil twilight, holding onto the horizon light longer.
+            raw_fade = np.clip((sun_deg + 14.0) / 14.0, 0, 1)
+            fade_twilight_to_night = np.power(raw_fade, 0.6)
             bg_image = twilight_sky_matrix * fade_twilight_to_night + night_sky_matrix * (1.0 - fade_twilight_to_night)
             
-        # Apply eye-adaptation tone mapping and exponential standard gamma encoding
+        # Apply eye-adaptation tone mapping and exponential standard adaptive gamma encoding
         bg_image = np.clip(bg_image, 0.0, 1.0)
         
-        # FIXED: Widened the gamma scaling window out to -12.0 degrees. This keeps 
-        # the sky mid-tones beautifully lifted and blue at 9:45 PM, while still falling 
-        # into a rich, deep broadcast black by 11:30 PM.
-        gamma_exponent = 2.0 if sun_deg > 0 else np.clip(2.0 + (sun_deg / 12.0), 1.0, 2.0)
+        # FIXED: Adjusted the gamma decay window. This keeps mid-tones brighter and more 
+        # vibrant at 9:30 PM, bridging the gap between Stellarium's brightness and reality.
+        gamma_exponent = 2.0 if sun_deg > 0 else np.clip(2.0 + (sun_deg / 10.0), 1.0, 2.0)
         bg_image = bg_image ** (1.0 / gamma_exponent)
         
         grid_color = "#ffffff" if sun_deg > 0 else ("#475569" if sun_deg > -6.0 else "#334155")
