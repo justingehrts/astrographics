@@ -138,92 +138,89 @@ if st.button("Generate Sky Graphic", type="primary"):
         
         # ======================================================================
         # SECTION 3: STELLARIUM-ADAPTED VECTORIZED LIGHT PATH ENGINE
-        # Computes continuous Rayleigh/Mie scattering profiles without step limits.
         # ======================================================================
         x_pixels, y_pixels = 150, 100
         x_space = np.linspace(az_min, az_max, x_pixels)
         y_space = np.linspace(0, 40, y_pixels)
         X_mesh, Y_mesh = np.meshgrid(x_space, y_space)
         
-        # Convert geometric angles to true radians for 2D matrix calculation
         rad_az_mesh = np.radians(X_mesh)
         rad_alt_mesh = np.radians(Y_mesh)
         rad_sun_az = np.radians(sun_az_deg)
         rad_sun_alt = np.radians(sun_deg)
         
-        # Compute exact angular scattering distance (theta) across the canvas frame
         cos_scatter_angle = (np.sin(rad_alt_mesh) * np.sin(rad_sun_alt) + 
                              np.cos(rad_alt_mesh) * np.cos(rad_sun_alt) * np.cos(rad_az_mesh - rad_sun_az))
         theta_deg = np.degrees(np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0)))
         
-        # Calculate localized scattering intensity parameters natively
-        f_scatter = np.exp(-(theta_deg / 50.0)**2)  # Mie forward scattering glow dome
+        f_scatter = np.exp(-(theta_deg / 50.0)**2)  
         
         # 1. COMPUTE CONTINUOUS AIR MASS PATHWAY & ATMOSPHERIC EXTINCTION
         sun_alt_clamped = max(0.1, sun_deg)
         air_mass_sun = 1.0 / (np.sin(np.radians(sun_alt_clamped)) + 0.15 * (sun_alt_clamped + 3.885) ** -1.253)
         
-        # Wavelength absorption scaling vectors (Rayleigh Extinction profiles)
         extinction_R = np.exp(-0.02 * air_mass_sun)
         extinction_G = np.exp(-0.04 * air_mass_sun)
         extinction_B = np.exp(-0.10 * air_mass_sun)
         
         # 2. DEFINE PHYSICAL SCATTERING COLOR BASES
-        color_sky_blue = np.array([30, 110, 255]) / 255.0
+        color_sky_blue = np.array([35, 115, 245]) / 255.0     # Tuned crisp broadcast blue
         color_space_navy = np.array([10, 16, 28]) / 255.0
         
-        # The sun's light shifts dynamically down from bright white to deep gold/amber based on air mass
         sun_filtered_R = 1.0 * extinction_R
-        sun_filtered_G = 0.95 * extinction_G
-        sun_filtered_B = 0.82 * extinction_B
+        sun_filtered_G = 0.92 * extinction_G
+        sun_filtered_B = 0.78 * extinction_B
         color_sunset_glow = np.array([sun_filtered_R, sun_filtered_G, sun_filtered_B])
         
         # 3. VECTORIZED SKY MESH BUILDING
         v_frac = Y_mesh / 40.0
         
-        # Calculate ambient sunset attenuation factors for the horizon base
-        day_progress = np.clip(sun_deg / 10.0, 0, 1)
+        # Smoothly warm up the day horizon base as the sun nears the horizon line
+        day_progress = np.clip((sun_deg - 1.0) / 6.0, 0, 1)
         ambient_day_horiz = color_sky_blue * 0.4 * day_progress + color_sunset_glow * 0.85 * (1.0 - day_progress)
         
-        # FIXED: Corrected inverted vertical blend mapping. The deep sky blue is now sent 
-        # to the top of the canvas, while ambient_day_horiz pins perfectly along the tree line.
         day_base = ambient_day_horiz[None, None, :] * (1.0 - v_frac[..., None]) + color_sky_blue[None, None, :] * v_frac[..., None]
-        day_mie_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * 0.5
+        day_mie_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * 0.4
         day_sky_matrix = np.clip(day_base + day_mie_glow, 0, 1)
         
-        # FIXED: Corrected inverted twilight matrix scaling to ensure golden-hour colors lift off the horizon line
-        twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * (1.0 - v_frac[..., None]) * 0.85
+        # Generate the twilight scattering base matrix
+        twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * (1.0 - v_frac[..., None]) * 0.90
         twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + np.array([20, 45, 95])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
         twilight_sky_matrix = np.clip(twilight_horiz_glow + twilight_upper_sky, 0, 1)
         
-        # Generate the full nighttime matrix plate (dark space navy with a subtle midnight horizon lift)
         night_sky_matrix = color_space_navy[None, None, :] * v_frac[..., None] + np.array([11, 17, 30]) / 255.0 * (1.0 - v_frac[..., None])
         
         # --- 4. MAP THE EARTH'S SHADOW WEDGE & THE BELT OF VENUS ---
         az_diff_rad = np.radians(X_mesh - sun_az_deg)
         h_shadow = np.degrees(np.arcsin(np.clip(np.sin(np.radians(sun_deg)) * np.cos(az_diff_rad), -1.0, 1.0)))
         
-        # Calculate the soft pink anti-twilight backscattering strip immediately above the shadow
         belt_of_venus_mask = np.exp(-((Y_mesh - (h_shadow + 3.0)) / 3.0)**2) * np.clip((sun_deg + 5.0) / 5.0, 0, 1)
         belt_of_venus_mask = np.where(h_shadow < 0, belt_of_venus_mask, 0)
         
-        # Add the pink scattering arch directly into the twilight matrix calculation
         twilight_sky_matrix[..., 0] += belt_of_venus_mask * 0.16  
         twilight_sky_matrix[..., 1] += belt_of_venus_mask * 0.05
         twilight_sky_matrix[..., 2] += belt_of_venus_mask * 0.08
         
-        # --- 5. EXECUTE CONTINUOUS ILLUMINATION COUPLING TRANSITION ---
-        if sun_deg > 0:
-            fade_day_to_twilight = np.clip(sun_deg / 2.0, 0, 1)
-            bg_image = day_sky_matrix * fade_day_to_twilight + twilight_sky_matrix * (1.0 - fade_day_to_twilight)
+        # --- 5. EXECUTE UNIFIED TRANSITION BLENDING ---
+        # Seamlessly handle day-to-twilight over a broader, stable geometric range
+        if sun_deg > 2.0:
+            bg_image = day_sky_matrix
+        elif sun_deg >= -2.0:
+            # Broaden the transition cross-fade window around the horizon line
+            fade_weight = np.clip((sun_deg + 2.0) / 4.0, 0, 1)
+            bg_image = day_sky_matrix * fade_weight + twilight_sky_matrix * (1.0 - fade_weight)
         else:
-            raw_fade = np.clip((sun_deg + 14.0) / 14.0, 0, 1)
+            raw_fade = np.clip((sun_deg + 14.0) / 12.0, 0, 1)
             fade_twilight_to_night = np.power(raw_fade, 0.6)
             bg_image = twilight_sky_matrix * fade_twilight_to_night + night_sky_matrix * (1.0 - fade_twilight_to_night)
             
-        # Apply eye-adaptation tone mapping and exponential standard adaptive gamma encoding
+        # --- 6. UNIFIED DYNAMIC GAMMA MAPPING ---
+        # FIXED: Removed the rigid conditional step function at 0 degrees.
+        # Now gamma transitions continuously from 2.0 down to 1.0 over a broad 
+        # range (+6.0 to -12.0 degrees). This entirely eliminates the exposure cliff.
+        gamma_exponent = np.clip(1.0 + (sun_deg + 12.0) / 18.0, 1.0, 2.0)
+        
         bg_image = np.clip(bg_image, 0.0, 1.0)
-        gamma_exponent = 2.0 if sun_deg > 0 else np.clip(2.0 + (sun_deg / 10.0), 1.0, 2.0)
         bg_image = bg_image ** (1.0 / gamma_exponent)
         
         grid_color = "#ffffff" if sun_deg > 0 else ("#475569" if sun_deg > -6.0 else "#334155")
