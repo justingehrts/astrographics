@@ -193,8 +193,10 @@ if st.button("Generate Sky Graphic", type="primary"):
         day_mie_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * 0.4
         day_sky_matrix = np.clip(day_base + day_mie_glow, 0, 1)
         
-        # Generate the twilight scattering base matrix (glowing bronze horizon fading up to deep indigo)
-        twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * np.exp(-v_frac * 3.5)[..., None]
+        # PRO TIP: Bump the scaling multiplier from 0.4 up to 0.75.
+        # This injects significantly more luminous amber/bronze backscattering light 
+        # along the horizon, making the sunset flare distinct and bright on air.
+        twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * np.exp(-v_frac * 3.5)[..., None] * 0.75
         twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + np.array([25, 55, 105])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
         twilight_sky_matrix = np.clip(twilight_horiz_glow + twilight_upper_sky, 0, 1)
         
