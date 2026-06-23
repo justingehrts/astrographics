@@ -50,25 +50,23 @@ selected_tz = st.sidebar.selectbox("Time Zone", tz_options, index=0)
 
 # ======================================================================
 # URL QUERY PARAMETER ENGINE
-# Reads the URL state to dynamically set defaults, improving user bookmarking.
+# Reads the URL state to dynamically set defaults, improving usability.
 # ======================================================================
-# 1. Look for 'lat' in the URL string; default to 39.96 (Columbus) if missing or invalid
 try:
     url_lat = float(st.query_params.get("lat", 39.96))
 except ValueError:
     url_lat = 39.96
 
-# 2. Look for 'lon' in the URL string; default to -83.00 if missing or invalid
 try:
     url_lon = float(st.query_params.get("lon", -83.00))
 except ValueError:
     url_lon = -83.00
 
-# 3. Pass the URL variables as the sticky default values for the inputs
+# Pass the URL variables as the sticky default values for the inputs
 lat = st.sidebar.number_input("Latitude", value=url_lat, step=0.01, format="%.2f")
 lon = st.sidebar.number_input("Longitude", value=url_lon, step=0.01, format="%.2f")
 
-# 4. Push the values back to the browser URL dynamically if the user updates them manually
+# Push the values back to the browser URL dynamically if updated manually
 st.query_params["lat"] = f"{lat:.2f}"
 st.query_params["lon"] = f"{lon:.2f}"
 
@@ -180,24 +178,22 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_filtered_B = 0.82 * extinction_B
         color_sunset_glow = np.array([sun_filtered_R, sun_filtered_G, sun_filtered_B])
         
-        # Calculate global illumination factor
-        illumination = np.clip((sun_deg + 6.0) / 12.0, 0, 1)
-        
         # 3. VECTORIZED SKY MESH BUILDING
         v_frac = Y_mesh / 40.0
         
-        # FIXED: Injected a solar attenuation blend into the day horizon base. As the sun sinks,
-        # the bottom of the daytime sky matrix smoothly shifts from soft blue to ambient gold.
+        # Calculate ambient sunset attenuation factors for the horizon base
         day_progress = np.clip(sun_deg / 10.0, 0, 1)
-        ambient_day_horiz = color_sky_blue * 0.4 * day_progress + color_sunset_glow * 0.75 * (1.0 - day_progress)
+        ambient_day_horiz = color_sky_blue * 0.4 * day_progress + color_sunset_glow * 0.85 * (1.0 - day_progress)
         
-        day_base = color_sky_blue[None, None, :] * (1.0 - v_frac[..., None]) + ambient_day_horiz[None, None, :] * v_frac[..., None]
-        day_mie_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * 0.4
+        # FIXED: Corrected inverted vertical blend mapping. The deep sky blue is now sent 
+        # to the top of the canvas, while ambient_day_horiz pins perfectly along the tree line.
+        day_base = ambient_day_horiz[None, None, :] * (1.0 - v_frac[..., None]) + color_sky_blue[None, None, :] * v_frac[..., None]
+        day_mie_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * 0.5
         day_sky_matrix = np.clip(day_base + day_mie_glow, 0, 1)
         
-        # Generate the twilight scattering base matrix (glowing bronze horizon fading up to deep indigo)
-        twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * np.exp(-v_frac * 1.8)[..., None] * 0.75
-        twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + np.array([25, 55, 105])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
+        # FIXED: Corrected inverted twilight matrix scaling to ensure golden-hour colors lift off the horizon line
+        twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * (1.0 - v_frac[..., None]) * 0.85
+        twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + np.array([20, 45, 95])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
         twilight_sky_matrix = np.clip(twilight_horiz_glow + twilight_upper_sky, 0, 1)
         
         # Generate the full nighttime matrix plate (dark space navy with a subtle midnight horizon lift)
@@ -218,8 +214,6 @@ if st.button("Generate Sky Graphic", type="primary"):
         
         # --- 5. EXECUTE CONTINUOUS ILLUMINATION COUPLING TRANSITION ---
         if sun_deg > 0:
-            # FIXED: Set to a crisp 2.0 span to ensure the full daylight blue holds overhead 
-            # while the horizon base warms up naturally.
             fade_day_to_twilight = np.clip(sun_deg / 2.0, 0, 1)
             bg_image = day_sky_matrix * fade_day_to_twilight + twilight_sky_matrix * (1.0 - fade_day_to_twilight)
         else:
