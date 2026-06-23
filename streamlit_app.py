@@ -139,7 +139,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_ylim(0, 40)
         
         # ======================================================================
-        # SECTION 3: STELLARIUM-ADAPTED VECTORIZED LIGHT PATH ENGNE
+        # SECTION 3: STELLARIUM-ADAPTED VECTORIZED LIGHT PATH ENGINE
         # Computes continuous Rayleigh/Mie scattering profiles without step limits.
         # ======================================================================
         x_pixels, y_pixels = 150, 100
@@ -162,12 +162,10 @@ if st.button("Generate Sky Graphic", type="primary"):
         f_scatter = np.exp(-(theta_deg / 50.0)**2)  # Mie forward scattering glow dome
         
         # 1. COMPUTE CONTINUOUS AIR MASS PATHWAY & ATMOSPHERIC EXTINCTION
-        # Simulates the physical thickening of air filters as the sun sets
         sun_alt_clamped = max(0.1, sun_deg)
         air_mass_sun = 1.0 / (np.sin(np.radians(sun_alt_clamped)) + 0.15 * (sun_alt_clamped + 3.885) ** -1.253)
         
         # Wavelength absorption scaling vectors (Rayleigh Extinction profiles)
-        # Red wavelengths pass cleanly; blue wavelengths are completely scattered away at low angles
         extinction_R = np.exp(-0.02 * air_mass_sun)
         extinction_G = np.exp(-0.04 * air_mass_sun)
         extinction_B = np.exp(-0.10 * air_mass_sun)
@@ -188,20 +186,21 @@ if st.button("Generate Sky Graphic", type="primary"):
         # 3. VECTORIZED SKY MESH BUILDING
         v_frac = Y_mesh / 40.0
         
-        # Generate the daytime Rayleigh sky base matrix
-        day_base = color_sky_blue[None, None, :] * (1.0 - v_frac[..., None]) + (color_sky_blue * 0.4)[None, None, :] * v_frac[..., None]
+        # FIXED: Injected a solar attenuation blend into the day horizon base. As the sun sinks,
+        # the bottom of the daytime sky matrix smoothly shifts from soft blue to ambient gold.
+        day_progress = np.clip(sun_deg / 10.0, 0, 1)
+        ambient_day_horiz = color_sky_blue * 0.4 * day_progress + color_sunset_glow * 0.75 * (1.0 - day_progress)
+        
+        day_base = color_sky_blue[None, None, :] * (1.0 - v_frac[..., None]) + ambient_day_horiz[None, None, :] * v_frac[..., None]
         day_mie_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * 0.4
         day_sky_matrix = np.clip(day_base + day_mie_glow, 0, 1)
         
-        # FIXED: Softened the vertical decay from 3.5 down to 1.8. This allows the golden 
-        # hour and twilight light column to extend beautifully up into the lower sky 
-        # instead of compressing into a thin, dusky band right at the tree line.
+        # Generate the twilight scattering base matrix (glowing bronze horizon fading up to deep indigo)
         twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * np.exp(-v_frac * 1.8)[..., None] * 0.75
         twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + np.array([25, 55, 105])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
         twilight_sky_matrix = np.clip(twilight_horiz_glow + twilight_upper_sky, 0, 1)
         
-        # FIXED: Lowered the horizon baseline coefficients from [16, 26, 44] down to [11, 17, 30]
-        # to ensure that 11:30 PM plates render a clean, rich midnight dark navy instead of a washed-out slate.
+        # Generate the full nighttime matrix plate (dark space navy with a subtle midnight horizon lift)
         night_sky_matrix = color_space_navy[None, None, :] * v_frac[..., None] + np.array([11, 17, 30]) / 255.0 * (1.0 - v_frac[..., None])
         
         # --- 4. MAP THE EARTH'S SHADOW WEDGE & THE BELT OF VENUS ---
@@ -213,15 +212,14 @@ if st.button("Generate Sky Graphic", type="primary"):
         belt_of_venus_mask = np.where(h_shadow < 0, belt_of_venus_mask, 0)
         
         # Add the pink scattering arch directly into the twilight matrix calculation
-        twilight_sky_matrix[..., 0] += belt_of_venus_mask * 0.16  # Inject warm pink wavelengths
+        twilight_sky_matrix[..., 0] += belt_of_venus_mask * 0.16  
         twilight_sky_matrix[..., 1] += belt_of_venus_mask * 0.05
         twilight_sky_matrix[..., 2] += belt_of_venus_mask * 0.08
         
         # --- 5. EXECUTE CONTINUOUS ILLUMINATION COUPLING TRANSITION ---
         if sun_deg > 0:
-            # FIXED: Sharpened the denominator window to 2.0. This guarantees that 
-            # at 9:00 PM (sun > 0), the bright daytime Rayleigh blue retains 85%+ 
-            # of its intensity, preventing premature duskiness.
+            # FIXED: Set to a crisp 2.0 span to ensure the full daylight blue holds overhead 
+            # while the horizon base warms up naturally.
             fade_day_to_twilight = np.clip(sun_deg / 2.0, 0, 1)
             bg_image = day_sky_matrix * fade_day_to_twilight + twilight_sky_matrix * (1.0 - fade_day_to_twilight)
         else:
@@ -231,9 +229,6 @@ if st.button("Generate Sky Graphic", type="primary"):
             
         # Apply eye-adaptation tone mapping and exponential standard adaptive gamma encoding
         bg_image = np.clip(bg_image, 0.0, 1.0)
-        
-        # FIXED: Adjusted the gamma decay window. This keeps mid-tones brighter and more 
-        # vibrant at 9:30 PM, bridging the gap between Stellarium's brightness and reality.
         gamma_exponent = 2.0 if sun_deg > 0 else np.clip(2.0 + (sun_deg / 10.0), 1.0, 2.0)
         bg_image = bg_image ** (1.0 / gamma_exponent)
         
