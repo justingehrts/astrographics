@@ -193,10 +193,10 @@ if st.button("Generate Sky Graphic", type="primary"):
         day_mie_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * 0.4
         day_sky_matrix = np.clip(day_base + day_mie_glow, 0, 1)
         
-        # PRO TIP: Bump the scaling multiplier from 0.4 up to 0.75.
-        # This injects significantly more luminous amber/bronze backscattering light 
-        # along the horizon, making the sunset flare distinct and bright on air.
-        twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * np.exp(-v_frac * 3.5)[..., None] * 0.75
+        # FIXED: Softened the vertical decay from 3.5 down to 1.8. This allows the golden 
+        # hour and twilight light column to extend beautifully up into the lower sky 
+        # instead of compressing into a thin, dusky band right at the tree line.
+        twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * np.exp(-v_frac * 1.8)[..., None] * 0.75
         twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + np.array([25, 55, 105])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
         twilight_sky_matrix = np.clip(twilight_horiz_glow + twilight_upper_sky, 0, 1)
         
@@ -219,11 +219,12 @@ if st.button("Generate Sky Graphic", type="primary"):
         
         # --- 5. EXECUTE CONTINUOUS ILLUMINATION COUPLING TRANSITION ---
         if sun_deg > 0:
-            fade_day_to_twilight = np.clip(sun_deg / 6.0, 0, 1)
+            # FIXED: Sharpened the denominator window to 2.0. This guarantees that 
+            # at 9:00 PM (sun > 0), the bright daytime Rayleigh blue retains 85%+ 
+            # of its intensity, preventing premature duskiness.
+            fade_day_to_twilight = np.clip(sun_deg / 2.0, 0, 1)
             bg_image = day_sky_matrix * fade_day_to_twilight + twilight_sky_matrix * (1.0 - fade_day_to_twilight)
         else:
-            # FIXED: Applied a non-linear power curve (0.6) to keep the twilight matrix 
-            # highly dominant during civil twilight, holding onto the horizon light longer.
             raw_fade = np.clip((sun_deg + 14.0) / 14.0, 0, 1)
             fade_twilight_to_night = np.power(raw_fade, 0.6)
             bg_image = twilight_sky_matrix * fade_twilight_to_night + night_sky_matrix * (1.0 - fade_twilight_to_night)
