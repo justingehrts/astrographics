@@ -102,6 +102,8 @@ direction = st.sidebar.selectbox(
 # --- SIDEBAR: 3. GRAPHIC TOGGLES ---
 st.sidebar.header("3. Graphic Toggles")
 
+# Turbidity ranges from 1.0 (Crisp/Clean) to 5.0 (Thick Haze/Humid)
+turbidity = st.sidebar.slider("Atmospheric Haze (Turbidity)", 1.0, 5.0, 2.0, step=0.5)
 show_labels = st.sidebar.checkbox("Show Object Labels", value=True)
 star_brightness = st.sidebar.slider("Star Visibility Limit", 1.0, 4.5, 2.5, step=0.5)
 
@@ -155,9 +157,33 @@ if st.button("Generate Sky Graphic", type="primary"):
         rad_sun_az = np.radians(sun_az_deg)
         rad_sun_alt = np.radians(sun_deg)
         
+        # Compute exact angular scattering distance (theta) across the canvas frame
         cos_scatter_angle = (np.sin(rad_alt_mesh) * np.sin(rad_sun_alt) + 
                              np.cos(rad_alt_mesh) * np.cos(rad_sun_alt) * np.cos(rad_az_mesh - rad_sun_az))
         theta_deg = np.degrees(np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0)))
+        
+        # TURBIDITY 1: Expand the Mie scattering glow dome based on the slider
+        mie_width = 30.0 + (turbidity * 10.0) 
+        f_scatter = np.exp(-(theta_deg / mie_width)**2)  
+        
+        # 1. COMPUTE CONTINUOUS AIR MASS PATHWAY & ATMOSPHERIC EXTINCTION
+        sun_alt_clamped = max(0.1, sun_deg)
+        air_mass_sun = 1.0 / (np.sin(np.radians(sun_alt_clamped)) + 0.15 * (sun_alt_clamped + 3.885) ** -1.253)
+        
+        # TURBIDITY 2: Increase wavelength absorption scaling based on haze
+        ext_factor = 1.0 + (turbidity - 1.0) * 0.25
+        extinction_R = np.exp(-0.02 * ext_factor * air_mass_sun)
+        extinction_G = np.exp(-0.04 * ext_factor * air_mass_sun)
+        extinction_B = np.exp(-0.10 * ext_factor * air_mass_sun)
+        
+        # 2. DEFINE PHYSICAL SCATTERING COLOR BASES
+        # TURBIDITY 3: Desaturate the deep crisp blue into a hazy washed-out blue
+        base_blue = np.array([35, 115, 245]) / 255.0
+        haze_grey = np.array([170, 185, 200]) / 255.0
+        haze_blend = np.clip((turbidity - 1.0) / 6.0, 0, 1)
+        
+        color_sky_blue = base_blue * (1.0 - haze_blend) + haze_grey * haze_blend
+        color_space_navy = np.array([10, 16, 28]) / 255.0
         
         f_scatter = np.exp(-(theta_deg / 50.0)**2)  
         
