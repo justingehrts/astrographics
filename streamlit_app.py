@@ -31,8 +31,12 @@ def get_astronomy_data():
     loader = Loader('.')
     ts = loader.timescale()
     eph = loader('de421.bsp')
-    with loader.open('hip_main.dat') as f:
+    
+    # FIXED: Replaced 'hip_main.dat' with hipparcos.URL
+    # This forces Streamlit Cloud to download the catalog if it's missing natively.
+    with loader.open(hipparcos.URL) as f:
         stars_df = hipparcos.load_dataframe(f)
+        
     return ts, eph, stars_df
 
 # Load the data models natively
