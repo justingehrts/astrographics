@@ -9,15 +9,36 @@ from matplotlib.path import Path
 import matplotlib.patches as patches
 import io
 import numpy as np
+import pandas as pd
 
 # Core astronomical math engine
-from skyfield.api import load, wgs84, Star
+from skyfield.api import load, wgs84, Star, Loader
+from skyfield.data import hipparcos
 
 # Set page layout to wide for a clean dashboard feel
 st.set_page_config(layout="wide", page_title="Custom Sky Graphic Generator")
 
 st.title("🌌 Broadcast Sky Graphic Generator")
 st.write("A lightweight, reliable engine rendering clean astronomical plates with native horizon silhouettes.")
+
+# ======================================================================
+# CACHED DATA ENGINE
+# Loads the heavy ephemeris and star catalog files into memory exactly once,
+# preventing timeouts and massive latency delays on cloud deployments.
+# ======================================================================
+@st.cache_resource
+def get_astronomy_data():
+    loader = Loader('.')
+    ts = loader.timescale()
+    eph = loader('de421.bsp')
+    with loader.open('hip_main.dat') as f:
+        stars_df = hipparcos.load_dataframe(f)
+    return ts, eph, stars_df
+
+# Load the data models natively
+ts, eph, stars_df = get_astronomy_data()
+earth = eph['earth']
+sun = eph['sun']
 
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("1. Observation Settings")
@@ -50,7 +71,6 @@ selected_tz = st.sidebar.selectbox("Time Zone", tz_options, index=0)
 
 # ======================================================================
 # URL QUERY PARAMETER ENGINE
-# Reads the URL state to dynamically set defaults, improving usability.
 # ======================================================================
 try:
     url_lat = float(st.query_params.get("lat", 39.96))
@@ -62,11 +82,9 @@ try:
 except ValueError:
     url_lon = -83.00
 
-# Pass the URL variables as the sticky default values for the inputs
 lat = st.sidebar.number_input("Latitude", value=url_lat, step=0.01, format="%.2f")
 lon = st.sidebar.number_input("Longitude", value=url_lon, step=0.01, format="%.2f")
 
-# Push the values back to the browser URL dynamically if updated manually
 st.query_params["lat"] = f"{lat:.2f}"
 st.query_params["lon"] = f"{lon:.2f}"
 
@@ -74,7 +92,7 @@ st.sidebar.header("2. View Window")
 direction = st.sidebar.selectbox(
     "Looking Direction", 
     ["North", "Northeast", "East", "Southeast", "South", "Southwest", "West", "Northwest"], 
-    index=6  # Default to West
+    index=6
 )
 
 # --- SIDEBAR: 3. GRAPHIC TOGGLES ---
@@ -96,16 +114,9 @@ sky_conditions = {
 
 st.sidebar.caption(f"**Current Viewport Simulation:** \n{sky_conditions[star_brightness]}")
 
-# Map all 8 headings to strict 90-degree rectangular Azimuth spans
 az_map = {
-    "North": (315, 405),
-    "Northeast": (0, 90),
-    "East": (45, 135),
-    "Southeast": (90, 180),
-    "South": (135, 225),
-    "Southwest": (180, 270),
-    "West": (225, 315),
-    "Northwest": (270, 360)
+    "North": (315, 405), "Northeast": (0, 90), "East": (45, 135), "Southeast": (90, 180),
+    "South": (135, 225), "Southwest": (180, 270), "West": (225, 315), "Northwest": (270, 360)
 }
 az_min, az_max = az_map[direction]
 
@@ -113,25 +124,16 @@ az_min, az_max = az_map[direction]
 if st.button("Generate Sky Graphic", type="primary"):
     with st.spinner("Computing high-fidelity directional sky model and celestial structures..."):
         
-        # Combine inputs into a localized datetime object
         dt_local = datetime.combine(obs_date, obs_time, tzinfo=ZoneInfo(selected_tz))
         dt_utc = dt_local.astimezone(ZoneInfo("UTC"))
-        
-        # Initialize Skyfield ephemeris engines
-        ts = load.timescale()
         t = ts.from_datetime(dt_utc)
-        eph = load('de421.bsp')
-        earth = eph['earth']
         observer_loc = earth + wgs84.latlon(lat, lon)
         
-        # Calculate the sun's altitude and azimuth relative to your horizon
-        sun = eph['sun']
         sun_astrometric = observer_loc.at(t).observe(sun)
         sun_alt, sun_az, _ = sun_astrometric.apparent().altaz()
         sun_deg = sun_alt.degrees
         sun_az_deg = sun_az.degrees
                 
-        # FORCE FIXED RENDERING DPI TO GUARANTEE TEXT & DOT SCALING CONSISTENCY
         fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, facecolor='none')
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, 40)
@@ -155,7 +157,6 @@ if st.button("Generate Sky Graphic", type="primary"):
         
         f_scatter = np.exp(-(theta_deg / 50.0)**2)  
         
-        # 1. COMPUTE CONTINUOUS AIR MASS PATHWAY & ATMOSPHERIC EXTINCTION
         sun_alt_clamped = max(0.1, sun_deg)
         air_mass_sun = 1.0 / (np.sin(np.radians(sun_alt_clamped)) + 0.15 * (sun_alt_clamped + 3.885) ** -1.253)
         
@@ -163,8 +164,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         extinction_G = np.exp(-0.04 * air_mass_sun)
         extinction_B = np.exp(-0.10 * air_mass_sun)
         
-        # 2. DEFINE PHYSICAL SCATTERING COLOR BASES
-        color_sky_blue = np.array([35, 115, 245]) / 255.0     # Tuned crisp broadcast blue
+        color_sky_blue = np.array([35, 115, 245]) / 255.0
         color_space_navy = np.array([10, 16, 28]) / 255.0
         
         sun_filtered_R = 1.0 * extinction_R
@@ -172,10 +172,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_filtered_B = 0.78 * extinction_B
         color_sunset_glow = np.array([sun_filtered_R, sun_filtered_G, sun_filtered_B])
         
-        # 3. VECTORIZED SKY MESH BUILDING
         v_frac = Y_mesh / 40.0
         
-        # Smoothly warm up the day horizon base as the sun nears the horizon line
         day_progress = np.clip((sun_deg - 1.0) / 6.0, 0, 1)
         ambient_day_horiz = color_sky_blue * 0.4 * day_progress + color_sunset_glow * 0.85 * (1.0 - day_progress)
         
@@ -183,14 +181,12 @@ if st.button("Generate Sky Graphic", type="primary"):
         day_mie_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * 0.4
         day_sky_matrix = np.clip(day_base + day_mie_glow, 0, 1)
         
-        # Generate the twilight scattering base matrix
         twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * (1.0 - v_frac[..., None]) * 0.90
         twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + np.array([20, 45, 95])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
         twilight_sky_matrix = np.clip(twilight_horiz_glow + twilight_upper_sky, 0, 1)
         
         night_sky_matrix = color_space_navy[None, None, :] * v_frac[..., None] + np.array([11, 17, 30]) / 255.0 * (1.0 - v_frac[..., None])
         
-        # --- 4. MAP THE EARTH'S SHADOW WEDGE & THE BELT OF VENUS ---
         az_diff_rad = np.radians(X_mesh - sun_az_deg)
         h_shadow = np.degrees(np.arcsin(np.clip(np.sin(np.radians(sun_deg)) * np.cos(az_diff_rad), -1.0, 1.0)))
         
@@ -201,12 +197,9 @@ if st.button("Generate Sky Graphic", type="primary"):
         twilight_sky_matrix[..., 1] += belt_of_venus_mask * 0.05
         twilight_sky_matrix[..., 2] += belt_of_venus_mask * 0.08
         
-        # --- 5. EXECUTE UNIFIED TRANSITION BLENDING ---
-        # Seamlessly handle day-to-twilight over a broader, stable geometric range
         if sun_deg > 2.0:
             bg_image = day_sky_matrix
         elif sun_deg >= -2.0:
-            # Broaden the transition cross-fade window around the horizon line
             fade_weight = np.clip((sun_deg + 2.0) / 4.0, 0, 1)
             bg_image = day_sky_matrix * fade_weight + twilight_sky_matrix * (1.0 - fade_weight)
         else:
@@ -214,10 +207,6 @@ if st.button("Generate Sky Graphic", type="primary"):
             fade_twilight_to_night = np.power(raw_fade, 0.6)
             bg_image = twilight_sky_matrix * fade_twilight_to_night + night_sky_matrix * (1.0 - fade_twilight_to_night)
             
-        # --- 6. UNIFIED DYNAMIC GAMMA MAPPING ---
-        # FIXED: Removed the rigid conditional step function at 0 degrees.
-        # Now gamma transitions continuously from 2.0 down to 1.0 over a broad 
-        # range (+6.0 to -12.0 degrees). This entirely eliminates the exposure cliff.
         gamma_exponent = np.clip(1.0 + (sun_deg + 12.0) / 18.0, 1.0, 2.0)
         
         bg_image = np.clip(bg_image, 0.0, 1.0)
@@ -225,7 +214,6 @@ if st.button("Generate Sky Graphic", type="primary"):
         
         grid_color = "#ffffff" if sun_deg > 0 else ("#475569" if sun_deg > -6.0 else "#334155")
 
-        # Draw the calculated continuous 2D analytical gradient mesh onto the background plane
         ax.imshow(
             bg_image,
             extent=[az_min, az_max, 0, 40],
@@ -250,12 +238,8 @@ if st.button("Generate Sky Graphic", type="primary"):
             rgba_glow[..., 3] = gaussian_glow * 0.28  
             
             ax.imshow(
-                rgba_glow,
-                extent=[az_min, az_max, 0, 40],
-                origin="lower",
-                aspect="auto",
-                zorder=1,
-                interpolation="bilinear"
+                rgba_glow, extent=[az_min, az_max, 0, 40], origin="lower",
+                aspect="auto", zorder=1, interpolation="bilinear"
             )
 
         # 4. PLOT PLANETS & DYNAMIC MOON ENGINE
@@ -272,15 +256,13 @@ if st.button("Generate Sky Graphic", type="primary"):
                 astrometric = observer_loc.at(t).observe(body)
                 alt, az, _ = astrometric.apparent().altaz()
                 
-                body_az = az.degrees
-                body_alt = alt.degrees
+                body_az, body_alt = az.degrees, alt.degrees
                 
                 if direction == "North" and body_az < 90:
                     body_az += 360
                     
                 if az_min <= body_az <= az_max and 0 <= body_alt <= 40:
                     ax.scatter(body_az, body_alt, s=size, color="#ffffff", zorder=50)
-                    
                     if show_labels:
                         ax.text(body_az + 0.5, body_alt + 0.5, label, color="#ffffff", fontsize=10, weight='bold', zorder=51)
             except Exception:
@@ -292,16 +274,14 @@ if st.button("Generate Sky Graphic", type="primary"):
             moon_astrometric = observer_loc.at(t).observe(moon_body)
             m_alt, m_az, _ = moon_astrometric.apparent().altaz()
             
-            moon_az = m_az.degrees
-            moon_alt = m_alt.degrees
+            moon_az, moon_alt = m_az.degrees, m_alt.degrees
             
             if direction == "North" and moon_az < 90:
                 moon_az += 360
                 
             if az_min <= moon_az <= az_max and 0 <= moon_alt <= 40:
-                sun_body = eph['sun']
                 m_pos = observer_loc.at(t).observe(moon_body).position.au
-                s_pos = observer_loc.at(t).observe(sun_body).position.au
+                s_pos = observer_loc.at(t).observe(sun).position.au
                 
                 m_dot_s = np.dot(m_pos, s_pos) / (np.linalg.norm(m_pos) * np.linalg.norm(s_pos))
                 elongation = np.arccos(np.clip(m_dot_s, -1.0, 1.0))
@@ -312,34 +292,27 @@ if st.button("Generate Sky Graphic", type="primary"):
                 r_x = 0.65  
                 r_y = r_x * (12.0 / 90.0) / (6.75 / 40.0)
                 
-                num_points = 30
-                phi = np.linspace(-np.pi/2, np.pi/2, num_points)
+                phi = np.linspace(-np.pi/2, np.pi/2, 30)
                 
-                x_outer_unit = np.cos(phi)
-                y_outer_unit = np.sin(phi)
+                x_outer_unit, y_outer_unit = np.cos(phi), np.sin(phi)
                 
                 phase_modifier = (illuminated_fraction - 0.5) * 2.0
-                x_inner_unit = x_outer_unit * phase_modifier
-                y_inner_unit = y_outer_unit
+                x_inner_unit, y_inner_unit = x_outer_unit * phase_modifier, y_outer_unit
                 
                 cos_p, sin_p = np.cos(pabl_rad), np.sin(pabl_rad)
                 
-                verts = []
-                for idx in range(num_points):
-                    x_rot = x_outer_unit[idx] * cos_p - y_outer_unit[idx] * sin_p
-                    y_rot = x_outer_unit[idx] * sin_p + y_outer_unit[idx] * cos_p
-                    rx = x_rot * r_x
-                    ry = y_rot * r_y
-                    verts.append((moon_az + rx, moon_alt + ry))
-                    
-                for idx in reversed(range(num_points)):
-                    x_rot = x_inner_unit[idx] * cos_p - y_inner_unit[idx] * sin_p
-                    y_rot = x_inner_unit[idx] * sin_p + y_inner_unit[idx] * cos_p
-                    rx = x_rot * r_x
-                    ry = y_rot * r_y
-                    verts.append((moon_az + rx, moon_alt + ry))
-                    
-                verts.append(verts[0]) 
+                # VECTORIZED MOON TERMINATOR MATH
+                x_out_rot = x_outer_unit * cos_p - y_outer_unit * sin_p
+                y_out_rot = x_outer_unit * sin_p + y_outer_unit * cos_p
+                
+                x_in_rot = (x_inner_unit * cos_p - y_inner_unit * sin_p)[::-1]
+                y_in_rot = (x_inner_unit * sin_p + y_inner_unit * cos_p)[::-1]
+                
+                x_verts = np.concatenate([x_out_rot, x_in_rot]) * r_x + moon_az
+                y_verts = np.concatenate([y_out_rot, y_in_rot]) * r_y + moon_alt
+                
+                verts = np.column_stack((x_verts, y_verts))
+                verts = np.vstack((verts, verts[0])) # Close polygon
                 
                 codes = [Path.MOVETO] + [Path.LINETO] * (len(verts) - 2) + [Path.CLOSEPOLY]
                 moon_path = Path(verts, codes)
@@ -356,89 +329,73 @@ if st.button("Generate Sky Graphic", type="primary"):
         except Exception:
             pass
 
-        # 5. PLOT TRUE CALCULATED NAVIGATIONAL STARS
+        # 5. DYNAMIC HIPPARCOS STAR FIELD
         if sun_deg <= -6:
-            star_data = [
-                ("Polaris", 1.97, (2, 31, 49.1), (89, 15, 51)),
-                ("Vega", 0.03, (18, 36, 56.3), (38, 47, 1)),
-                ("Capella", 0.08, (5, 16, 41.4), (45, 59, 53)),
-                ("Arcturus", -0.05, (14, 15, 39.7), (19, 10, 57)),
-                ("Betelgeuse", 0.50, (5, 55, 10.3), (7, 24, 25)),
-                ("Procyon", 0.34, (7, 39, 18.1), (5, 13, 30)),
-                ("Pollux", 1.14, (7, 45, 18.9), (28, 1, 34)),
-                ("Castor", 1.58, (7, 34, 36.0), (31, 53, 18)),
-                ("Spica", 0.98, (13, 25, 11.6), (-11, 9, 41)),
-                ("Altair", 0.76, (19, 50, 47.0), (8, 52, 6)),
-                ("Deneb", 1.25, (20, 41, 25.9), (45, 16, 49)),
-                ("Regulus", 1.36, (10, 8, 22.3), (11, 58, 2))
-            ]
+            # Filter catalog natively via user slider
+            visible_stars = stars_df[stars_df['magnitude'] <= star_brightness]
+            star_obj = Star.from_dataframe(visible_stars)
             
-            for name, mag, ra_tuple, dec_tuple in star_data:
-                if mag <= star_brightness:
-                    try:
-                        star_obj = Star(ra_hours=ra_tuple, dec_degrees=dec_tuple)
-                        star_astrometric = observer_loc.at(t).observe(star_obj)
-                        s_alt, s_az, _ = star_astrometric.apparent().altaz()
-                        
-                        star_az = s_az.degrees
-                        star_alt = s_alt.degrees
-                        
-                        if direction == "North" and star_az < 90:
-                            star_az += 360
-                            
-                        if az_min <= star_az <= az_max and 0 <= star_alt <= 40:
-                            size = max(1.5, (5.0 - mag) * 2.5)
-                            ax.scatter(star_az, star_alt, s=size, color="#ffffff", alpha=0.55, zorder=20)
-                            if show_labels:
-                                ax.text(star_az + 0.4, star_alt + 0.4, name, color="#ffffff", fontsize=9, alpha=0.5, zorder=21)
-                    except Exception:
-                        continue
+            # Vectorized altitude/azimuth calculations for the entire visible catalog
+            star_astrometric = observer_loc.at(t).observe(star_obj)
+            s_alt, s_az, _ = star_astrometric.apparent().altaz()
+            
+            star_az = s_az.degrees
+            star_alt = s_alt.degrees
+            
+            if direction == "North":
+                star_az = np.where(star_az < 90, star_az + 360, star_az)
+                
+            # Cull stars strictly to viewport margins
+            viewport_mask = (star_az >= az_min) & (star_az <= az_max) & (star_alt >= 0) & (star_alt <= 40)
+            
+            plot_az = star_az[viewport_mask]
+            plot_alt = star_alt[viewport_mask]
+            plot_mag = visible_stars['magnitude'].values[viewport_mask]
+            plot_hips = visible_stars.index.values[viewport_mask]
+            
+            sizes = np.maximum(0.5, (5.0 - plot_mag) * 2.5)
+            
+            # Plot the entire valid array simultaneously
+            ax.scatter(plot_az, plot_alt, s=sizes, color="#ffffff", alpha=0.7, zorder=20)
+            
+            # Dictionary of major anchor stars (Hipparcos ID -> Common Name)
+            major_stars = {
+                32349: "Sirius", 24608: "Capella", 69673: "Arcturus", 91262: "Vega", 
+                25336: "Rigel", 37279: "Procyon", 27989: "Betelgeuse", 97649: "Altair", 
+                21421: "Aldebaran", 65474: "Spica", 80112: "Antares", 37826: "Pollux", 
+                102098: "Deneb", 49669: "Regulus", 36850: "Castor", 677: "Polaris"
+            }
+            
+            if show_labels:
+                for az_val, alt_val, hip_id in zip(plot_az, plot_alt, plot_hips):
+                    if hip_id in major_stars:
+                        ax.text(az_val + 0.4, alt_val + 0.4, major_stars[hip_id], color="#ffffff", fontsize=9, alpha=0.5, zorder=21)
 
         # 6. FIXED SUBURBAN TREE HORIZON SILHOUETTE
         x_silhouette_space = np.linspace(az_min, az_max, 400)
         base_ground = 4.0 + 1.0 * np.sin(x_silhouette_space / 5)
         tree_canopy = 1.2 * np.sin(x_silhouette_space * 2.5) * np.cos(x_silhouette_space * 0.4)
         fine_foliage = 0.5 * np.sin(x_silhouette_space * 12.0)
-        y_silhouette = base_ground + tree_canopy + fine_foliage
-        y_silhouette = np.clip(y_silhouette, 2.0, 10.0)
+        y_silhouette = np.clip(base_ground + tree_canopy + fine_foliage, 2.0, 10.0)
 
         ax.fill_between(x_silhouette_space, -5, y_silhouette, color="#060c14", zorder=100)
         
-        # Clean up gridline decorations and formatting
         ax.grid(True, color=grid_color, alpha=0.15, linestyle='--', zorder=2)
         
-        # LOCKED FIXED 10-DEGREE SPACING WITH ALL LABELS FORCEFULLY HIDDEN
         ax.set_xticks(np.arange(az_min, az_max + 1, 10))
         ax.set_yticks(np.arange(0, 41, 10))
         
-        # FORCE BOTH AXES TO HIDE ALL TICK TEXT AND NUMBER LABELS NATIVELY
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)
         
-        # Strip out the spine borders to collapse bounding margins edge-to-edge
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        # --- DISPLAY & DOWNLOAD ---
         st.pyplot(fig)
         
         img_buf = io.BytesIO()
-        fig.savefig(
-            img_buf, 
-            format="png", 
-            dpi=150, 
-            facecolor="none",  
-            edgecolor="none",
-            pad_inches=0.0
-        )
+        fig.savefig(img_buf, format="png", dpi=150, facecolor="none", edgecolor="none", pad_inches=0.0)
         img_buf.seek(0)
         
-        st.download_button(
-            label="💾 Download High-Res PNG for Editing / On-Air",
-            data=img_buf,
-            file_name=f"custom_sky_{direction}.png",
-            mime="image/png"
-        )
-
-        # Completely clear out the figure state to prevent scaling bleed on re-runs
+        st.download_button(label="💾 Download High-Res PNG for Editing / On-Air", data=img_buf, file_name=f"custom_sky_{direction}.png", mime="image/png")
         plt.close(fig)
