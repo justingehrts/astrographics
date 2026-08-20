@@ -32,8 +32,7 @@ def get_astronomy_data():
     ts = loader.timescale()
     eph = loader('de421.bsp')
     
-    # FIXED: Replaced 'hip_main.dat' with hipparcos.URL
-    # This forces Streamlit Cloud to download the catalog if it's missing natively.
+    # Forces Streamlit Cloud to download the catalog natively if missing
     with loader.open(hipparcos.URL) as f:
         stars_df = hipparcos.load_dataframe(f)
         
@@ -102,7 +101,6 @@ direction = st.sidebar.selectbox(
 # --- SIDEBAR: 3. GRAPHIC TOGGLES ---
 st.sidebar.header("3. Graphic Toggles")
 
-# Turbidity ranges from 1.0 (Crisp/Clean) to 5.0 (Thick Haze/Humid)
 turbidity = st.sidebar.slider("Atmospheric Haze (Turbidity)", 1.0, 5.0, 2.0, step=0.5)
 show_labels = st.sidebar.checkbox("Show Object Labels", value=True)
 star_brightness = st.sidebar.slider("Star Visibility Limit", 1.0, 4.5, 2.5, step=0.5)
@@ -157,7 +155,6 @@ if st.button("Generate Sky Graphic", type="primary"):
         rad_sun_az = np.radians(sun_az_deg)
         rad_sun_alt = np.radians(sun_deg)
         
-        # Compute exact angular scattering distance (theta) across the canvas frame
         cos_scatter_angle = (np.sin(rad_alt_mesh) * np.sin(rad_sun_alt) + 
                              np.cos(rad_alt_mesh) * np.cos(rad_sun_alt) * np.cos(rad_az_mesh - rad_sun_az))
         theta_deg = np.degrees(np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0)))
@@ -166,7 +163,6 @@ if st.button("Generate Sky Graphic", type="primary"):
         mie_width = 30.0 + (turbidity * 10.0) 
         f_scatter = np.exp(-(theta_deg / mie_width)**2)  
         
-        # 1. COMPUTE CONTINUOUS AIR MASS PATHWAY & ATMOSPHERIC EXTINCTION
         sun_alt_clamped = max(0.1, sun_deg)
         air_mass_sun = 1.0 / (np.sin(np.radians(sun_alt_clamped)) + 0.15 * (sun_alt_clamped + 3.885) ** -1.253)
         
@@ -176,26 +172,24 @@ if st.button("Generate Sky Graphic", type="primary"):
         extinction_G = np.exp(-0.04 * ext_factor * air_mass_sun)
         extinction_B = np.exp(-0.10 * ext_factor * air_mass_sun)
         
-        # 2. DEFINE PHYSICAL SCATTERING COLOR BASES
-        # TURBIDITY 3: Desaturate the deep crisp blue into a hazy washed-out blue
+        # TURBIDITY 3: Calculate the global haze desaturation factor
+        haze_blend = np.clip((turbidity - 1.0) / 4.0, 0, 1) 
+        
         base_blue = np.array([35, 115, 245]) / 255.0
         haze_grey = np.array([170, 185, 200]) / 255.0
-        haze_blend = np.clip((turbidity - 1.0) / 6.0, 0, 1)
-        
         color_sky_blue = base_blue * (1.0 - haze_blend) + haze_grey * haze_blend
-        color_space_navy = np.array([10, 16, 28]) / 255.0
         
-        f_scatter = np.exp(-(theta_deg / 50.0)**2)  
-        
-        sun_alt_clamped = max(0.1, sun_deg)
-        air_mass_sun = 1.0 / (np.sin(np.radians(sun_alt_clamped)) + 0.15 * (sun_alt_clamped + 3.885) ** -1.253)
-        
-        extinction_R = np.exp(-0.02 * air_mass_sun)
-        extinction_G = np.exp(-0.04 * air_mass_sun)
-        extinction_B = np.exp(-0.10 * air_mass_sun)
-        
-        color_sky_blue = np.array([35, 115, 245]) / 255.0
-        color_space_navy = np.array([10, 16, 28]) / 255.0
+        base_navy = np.array([10, 16, 28]) / 255.0
+        haze_navy = np.array([25, 30, 40]) / 255.0
+        color_space_navy = base_navy * (1.0 - haze_blend) + haze_navy * haze_blend
+
+        base_twilight = np.array([20, 45, 95]) / 255.0
+        haze_twilight = np.array([45, 50, 60]) / 255.0
+        color_twilight_base = base_twilight * (1.0 - haze_blend) + haze_twilight * haze_blend
+
+        base_night = np.array([11, 17, 30]) / 255.0
+        haze_night = np.array([20, 22, 28]) / 255.0
+        color_night_base = base_night * (1.0 - haze_blend) + haze_night * haze_blend
         
         sun_filtered_R = 1.0 * extinction_R
         sun_filtered_G = 0.92 * extinction_G
@@ -212,10 +206,10 @@ if st.button("Generate Sky Graphic", type="primary"):
         day_sky_matrix = np.clip(day_base + day_mie_glow, 0, 1)
         
         twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * (1.0 - v_frac[..., None]) * 0.90
-        twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + np.array([20, 45, 95])[None, None, :] / 255.0 * (1.0 - v_frac[..., None])
+        twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + color_twilight_base[None, None, :] * (1.0 - v_frac[..., None])
         twilight_sky_matrix = np.clip(twilight_horiz_glow + twilight_upper_sky, 0, 1)
         
-        night_sky_matrix = color_space_navy[None, None, :] * v_frac[..., None] + np.array([11, 17, 30]) / 255.0 * (1.0 - v_frac[..., None])
+        night_sky_matrix = color_space_navy[None, None, :] * v_frac[..., None] + color_night_base[None, None, :] * (1.0 - v_frac[..., None])
         
         az_diff_rad = np.radians(X_mesh - sun_az_deg)
         h_shadow = np.degrees(np.arcsin(np.clip(np.sin(np.radians(sun_deg)) * np.cos(az_diff_rad), -1.0, 1.0)))
