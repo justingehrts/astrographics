@@ -277,7 +277,6 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_astrometric = observer_loc.at(t).observe(sun)
         sun_apparent = sun_astrometric.apparent()
         sun_alt, sun_az, _ = sun_apparent.altaz(temperature_C=STANDARD_TEMPERATURE_C, pressure_mbar=STANDARD_PRESSURE_MBAR)
-        sun_ra, sun_dec, _ = sun_apparent.radec()
         sun_deg = sun_alt.degrees
         sun_az_deg = sun_az.degrees
 
@@ -434,7 +433,6 @@ if st.button("Generate Sky Graphic", type="primary"):
             moon_astrometric = observer_loc.at(t).observe(moon_body)
             moon_apparent = moon_astrometric.apparent()
             m_alt, m_az, m_distance = moon_apparent.altaz(temperature_C=STANDARD_TEMPERATURE_C, pressure_mbar=STANDARD_PRESSURE_MBAR)
-            moon_ra, moon_dec, _ = moon_apparent.radec()
 
             moon_az, moon_alt = m_az.degrees, m_alt.degrees
 
@@ -448,13 +446,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                 elongation = np.arccos(np.clip(m_dot_s, -1.0, 1.0))
                 illuminated_fraction = 0.5 * (1.0 + np.cos(elongation))
 
-                bright_limb_pa = moon.bright_limb_position_angle_deg(
-                    sun_ra.hours, sun_dec.degrees, moon_ra.hours, moon_dec.degrees
-                )
-                lst_hours = (t.gast + lon / 15.0) % 24.0
-                hour_angle_deg = (lst_hours - moon_ra.hours) * 15.0
-                parallactic_deg = moon.parallactic_angle_deg(lat, moon_dec.degrees, hour_angle_deg)
-                pabl_rad = moon.bright_limb_plot_angle_rad(bright_limb_pa, parallactic_deg)
+                pabl_rad = moon.bright_limb_plot_angle_rad(sun_az_deg, sun_deg, moon_az, moon_alt)
 
                 r_x = moon.angular_radius_deg(m_distance.km) * 2.5  # visually exaggerated for broadcast legibility
                 r_y = r_x * (12.0 / 90.0) / (6.75 / alt_max)
