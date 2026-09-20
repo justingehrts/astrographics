@@ -1,7 +1,9 @@
 """Constellation stick figures, drawn as connected lines through the
 Hipparcos catalog already loaded for the star field.
 
-Line data: Marc van der Sluys, "ConstellationLines" (CC BY 4.0) --
+Line data: Marc van der Sluys, "ConstellationLines" (CC BY 4.0), with its
+Bright Star Catalogue (HR) star numbers converted to Hipparcos (HIP)
+numbers via the HYG Database's hip/hr cross-reference (CC BY-SA 4.0) --
 bundled at data/constellation_lines.csv; see
 data/CONSTELLATION_LINES_ATTRIBUTION.md for the full citation.
 """
