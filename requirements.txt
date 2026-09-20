@@ -2,4 +2,5 @@ streamlit
 matplotlib
 numpy
 pandas
+requests
 skyfield
