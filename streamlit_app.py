@@ -224,7 +224,9 @@ _seed_session_state_once("turbidity", location.SUBURBAN_DEFAULT[0])
 _seed_session_state_once("star_brightness", location.SUBURBAN_DEFAULT[1])
 
 turbidity = st.sidebar.slider("Atmospheric Haze (Turbidity)", 1.0, 5.0, step=0.5, key="turbidity")
-show_labels = st.sidebar.checkbox("Show Object Labels", value=True)
+show_labels = st.sidebar.checkbox("Show Planet/Moon Labels", value=True)
+show_major_star_labels = st.sidebar.checkbox("Show Major Star Labels", value=True)
+show_minor_star_labels = st.sidebar.checkbox("Show Minor Star Labels", value=False)
 show_constellations = st.sidebar.checkbox("Show Constellation Lines", value=True)
 star_brightness = st.sidebar.slider("Star Visibility Limit", 1.0, 4.5, step=0.5, key="star_brightness")
 
@@ -527,13 +529,18 @@ if st.button("Generate Sky Graphic", type="primary"):
                 32349: "Sirius", 24608: "Capella", 69673: "Arcturus", 91262: "Vega",
                 25336: "Rigel", 37279: "Procyon", 27989: "Betelgeuse", 97649: "Altair",
                 21421: "Aldebaran", 65474: "Spica", 80112: "Antares", 37826: "Pollux",
-                102098: "Deneb", 49669: "Regulus", 36850: "Castor", 677: "Polaris"
+                102098: "Deneb", 49669: "Regulus", 36850: "Castor", 11767: "Polaris"
             }
 
-            if show_labels:
+            if show_major_star_labels:
                 for az_val, alt_val, hip_id in zip(plot_az, plot_alt, plot_hips):
                     if hip_id in major_stars:
                         ax.text(az_val + 0.4, alt_val + 0.4, major_stars[hip_id], color="#ffffff", fontsize=9, alpha=0.5, zorder=21)
+
+            if show_minor_star_labels:
+                for az_val, alt_val, hip_id in zip(plot_az, plot_alt, plot_hips):
+                    if hip_id not in major_stars:
+                        ax.text(az_val + 0.4, alt_val + 0.4, f"HIP {hip_id}", color="#ffffff", fontsize=7, alpha=0.35, zorder=21)
 
             # --- CONSTELLATION STICK FIGURES ---
             if show_constellations:
