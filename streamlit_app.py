@@ -420,7 +420,8 @@ if st.button("Generate Sky Graphic", type="primary"):
                 if az_min <= body_az <= az_max and 0 <= body_alt <= alt_max:
                     mag = planetary_magnitude(astrometric)
                     size = size_for_magnitude(mag)
-                    ax.scatter(body_az, body_alt, s=size, color="#ffffff", zorder=50)
+                    body_color = extinction.rgb_transmission(body_alt, turbidity)
+                    ax.scatter(body_az, body_alt, s=size, color=body_color, zorder=50)
                     if show_labels:
                         ax.text(body_az + 0.5, body_alt + 0.5, label, color="#ffffff", fontsize=10, weight='bold', zorder=51)
             except Exception:
