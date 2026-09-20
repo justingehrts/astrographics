@@ -1,19 +1,20 @@
+import logging
 import streamlit as st
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 import matplotlib
 matplotlib.use("Agg")  # Safe headless execution for cloud servers
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.path import Path
 import matplotlib.patches as patches
 import io
 import numpy as np
-import pandas as pd
 
 # Core astronomical math engine
-from skyfield.api import load, wgs84, Star, Loader
+from skyfield.api import wgs84, Star, Loader
 from skyfield.data import hipparcos
+
+logger = logging.getLogger(__name__)
 
 # Set page layout to wide for a clean dashboard feel
 st.set_page_config(layout="wide", page_title="Custom Sky Graphic Generator")
@@ -123,6 +124,14 @@ az_map = {
     "South": (135, 225), "Southwest": (180, 270), "West": (225, 315), "Northwest": (270, 360)
 }
 az_min, az_max = az_map[direction]
+
+
+def normalize_az(az, direction):
+    """Shift azimuths below 90deg past 360 when viewing North, since its
+    view window (315-405) wraps across the 0/360 boundary. Works for both
+    scalar and array `az`."""
+    return np.where(az < 90, az + 360, az) if direction == "North" else az
+
 
 # --- GRAPHIC GENERATION LOGIC ---
 if st.button("Generate Sky Graphic", type="primary"):
@@ -282,14 +291,14 @@ if st.button("Generate Sky Graphic", type="primary"):
                 
                 body_az, body_alt = az.degrees, alt.degrees
                 
-                if direction == "North" and body_az < 90:
-                    body_az += 360
-                    
+                body_az = normalize_az(body_az, direction)
+
                 if az_min <= body_az <= az_max and 0 <= body_alt <= 40:
                     ax.scatter(body_az, body_alt, s=size, color="#ffffff", zorder=50)
                     if show_labels:
                         ax.text(body_az + 0.5, body_alt + 0.5, label, color="#ffffff", fontsize=10, weight='bold', zorder=51)
             except Exception:
+                logger.exception("Failed to compute/plot position for %s", label)
                 continue
 
         # --- DYNAMIC ROTATIONAL MOON PHASE VECTOR PATH ENGINE ---
@@ -300,9 +309,8 @@ if st.button("Generate Sky Graphic", type="primary"):
             
             moon_az, moon_alt = m_az.degrees, m_alt.degrees
             
-            if direction == "North" and moon_az < 90:
-                moon_az += 360
-                
+            moon_az = normalize_az(moon_az, direction)
+
             if az_min <= moon_az <= az_max and 0 <= moon_alt <= 40:
                 m_pos = observer_loc.at(t).observe(moon_body).position.au
                 s_pos = observer_loc.at(t).observe(sun).position.au
@@ -351,7 +359,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                 if show_labels:
                     ax.text(moon_az + r_x + 0.4, moon_alt + 0.6, "Moon", color="#ffffff", fontsize=11, weight='bold', zorder=51)
         except Exception:
-            pass
+            logger.exception("Failed to compute/plot Moon position")
 
         # 5. DYNAMIC HIPPARCOS STAR FIELD
         if sun_deg <= -6:
@@ -366,9 +374,8 @@ if st.button("Generate Sky Graphic", type="primary"):
             star_az = s_az.degrees
             star_alt = s_alt.degrees
             
-            if direction == "North":
-                star_az = np.where(star_az < 90, star_az + 360, star_az)
-                
+            star_az = normalize_az(star_az, direction)
+
             # Cull stars strictly to viewport margins
             viewport_mask = (star_az >= az_min) & (star_az <= az_max) & (star_alt >= 0) & (star_alt <= 40)
             

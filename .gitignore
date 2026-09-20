@@ -1,0 +1,12 @@
+# Skyfield ephemeris and star catalog data (downloaded on first run)
+*.bsp
+hip_main.dat*
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
