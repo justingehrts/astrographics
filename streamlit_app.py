@@ -169,23 +169,44 @@ DIRECTION_PRESETS = {
     "Custom": None, "North": 0.0, "Northeast": 45.0, "East": 90.0, "Southeast": 135.0,
     "South": 180.0, "Southwest": 225.0, "West": 270.0, "Northwest": 315.0,
 }
-preset_choice = st.sidebar.selectbox("Direction Preset", list(DIRECTION_PRESETS.keys()), index=0)
 
+
+def _apply_direction_preset():
+    preset = DIRECTION_PRESETS[st.session_state["direction_preset"]]
+    if preset is not None:
+        st.session_state["bearing"] = preset
+
+
+def _clear_preset_if_bearing_diverged():
+    preset = DIRECTION_PRESETS[st.session_state.get("direction_preset", "Custom")]
+    if preset is not None and st.session_state["bearing"] != preset:
+        # The bearing no longer matches the selected preset (the user
+        # nudged the slider directly), so the dropdown's label would
+        # otherwise be left showing a stale/misleading direction name.
+        st.session_state["direction_preset"] = "Custom"
+
+
+_seed_session_state_once("direction_preset", "Custom")
 _seed_session_state_once("bearing", url_bearing)
-if DIRECTION_PRESETS[preset_choice] is not None:
-    st.session_state["bearing"] = DIRECTION_PRESETS[preset_choice]
 _seed_session_state_once("fov_width", url_fov)
 _seed_session_state_once("alt_max", url_altmax)
 
-bearing = st.sidebar.slider("Compass Bearing (0=N, 90=E, 180=S, 270=W)", 0.0, 359.0, step=1.0, key="bearing")
+st.sidebar.selectbox(
+    "Direction Preset", list(DIRECTION_PRESETS.keys()),
+    key="direction_preset", on_change=_apply_direction_preset,
+)
+bearing = st.sidebar.slider(
+    "Compass Bearing (0=N, 90=E, 180=S, 270=W)", 0.0, 359.0, step=1.0,
+    key="bearing", on_change=_clear_preset_if_bearing_diverged,
+)
 fov_width = st.sidebar.slider("Field of View Width (deg)", 30.0, 180.0, step=5.0, key="fov_width")
 alt_max = st.sidebar.slider("Max Altitude Shown (deg)", 20.0, 90.0, step=5.0, key="alt_max")
 
 az_min = bearing - fov_width / 2.0
 az_max = bearing + fov_width / 2.0
 
-# --- SIDEBAR: 3. GRAPHIC TOGGLES ---
-st.sidebar.header("3. Graphic Toggles")
+# --- SIDEBAR: 3. SKY CONDITIONS ---
+st.sidebar.header("3. Sky Conditions")
 
 # Location-aware starting point for turbidity/star-brightness: on first
 # load (unless a shared link already specified them) or whenever the
@@ -224,10 +245,6 @@ _seed_session_state_once("turbidity", location.SUBURBAN_DEFAULT[0])
 _seed_session_state_once("star_brightness", location.SUBURBAN_DEFAULT[1])
 
 turbidity = st.sidebar.slider("Atmospheric Haze (Turbidity)", 1.0, 5.0, step=0.5, key="turbidity")
-show_labels = st.sidebar.checkbox("Show Planet/Moon Labels", value=True)
-show_major_star_labels = st.sidebar.checkbox("Show Major Star Labels", value=True)
-show_minor_star_labels = st.sidebar.checkbox("Show Minor Star Labels", value=False)
-show_constellations = st.sidebar.checkbox("Show Constellation Lines", value=True)
 star_brightness = st.sidebar.slider("Star Visibility Limit", 1.0, 4.5, step=0.5, key="star_brightness")
 
 sky_conditions = {
@@ -243,6 +260,14 @@ sky_conditions = {
 
 st.sidebar.caption(f"**Current Viewport Simulation:** \n{sky_conditions[star_brightness]}")
 
+# --- SIDEBAR: 4. LABELS & OVERLAYS ---
+st.sidebar.header("4. Labels & Overlays")
+
+show_labels = st.sidebar.checkbox("Show Planet/Moon Labels", value=True)
+show_major_star_labels = st.sidebar.checkbox("Show Major Star Labels", value=True)
+show_minor_star_labels = st.sidebar.checkbox("Show Minor Star Labels", value=False)
+show_constellations = st.sidebar.checkbox("Show Constellation Lines", value=True)
+
 # Persist the full view in the URL so a generated graphic is shareable/bookmarkable.
 st.query_params["lat"] = f"{lat:.2f}"
 st.query_params["lon"] = f"{lon:.2f}"
@@ -254,6 +279,11 @@ st.query_params["fov"] = f"{fov_width:.0f}"
 st.query_params["altmax"] = f"{alt_max:.0f}"
 st.query_params["turbidity"] = f"{turbidity:.1f}"
 st.query_params["brightness"] = f"{star_brightness:.1f}"
+
+with st.sidebar.expander("🔗 Shareable Link"):
+    st.caption("This exact view (location, time, direction, and sky settings) is captured below. Append it to this app's base URL to share or bookmark it -- or just copy the address bar, which already reflects it.")
+    _share_query = "&".join(f"{k}={v}" for k, v in st.query_params.items())
+    st.code(f"?{_share_query}", language=None)
 
 
 def size_for_magnitude(mag, reference_size=30.0, reference_mag=0.0, min_size=4.0, max_size=90.0):
