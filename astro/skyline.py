@@ -54,56 +54,65 @@ def _window_points(rng, edges, heights, lit_fraction):
     return points
 
 
-def _tree_line(x_space, rng):
+def _tree_line(x_space, rng, alt_max):
     """Smooth, non-repeating organic canopy via a small sum of randomly
     phased/scaled sine harmonics, plus a few taller trees poking up --
     avoids the obviously-periodic look of a fixed 2-3 term sine sum."""
     span = x_space[-1] - x_space[0]
     rel = x_space - x_space[0]
-    profile = np.full_like(x_space, 3.0)
+    profile = np.full_like(x_space, 0.22 * alt_max)
     for k in range(5):
         freq = rng.uniform(0.4, 2.5) * (k + 1)
         phase = rng.uniform(0, 2 * np.pi)
-        amp = rng.uniform(0.3, 1.1) / (k + 1)
+        amp = (rng.uniform(0.3, 1.1) / (k + 1)) * 0.09 * alt_max
         profile += amp * np.sin(2 * np.pi * freq * rel / span + phase)
     for pos in rng.uniform(x_space[0], x_space[-1], max(3, int(span / 12))):
         width = rng.uniform(1.0, 2.2)
-        profile += rng.uniform(0.8, 1.8) * np.exp(-((x_space - pos) / width) ** 2)
-    return np.clip(profile, 1.5, 10.0)
+        profile += rng.uniform(0.10, 0.22) * alt_max * np.exp(-((x_space - pos) / width) ** 2)
+    return np.clip(profile, 0.08 * alt_max, 0.6 * alt_max)
 
 
-def _open_field(x_space, rng):
+def _open_field(x_space, rng, alt_max):
     """Mostly flat, gently rolling ground -- a remote/open dark-sky site."""
     span = x_space[-1] - x_space[0]
     rel = x_space - x_space[0]
     freq = rng.uniform(0.3, 0.7)
     phase = rng.uniform(0, 2 * np.pi)
-    profile = 0.9 + 0.35 * np.sin(2 * np.pi * freq * rel / span + phase)
-    return np.clip(profile, 0.4, 2.0)
+    profile = 0.06 * alt_max + 0.025 * alt_max * np.sin(2 * np.pi * freq * rel / span + phase)
+    return np.clip(profile, 0.02 * alt_max, 0.12 * alt_max)
 
 
-def foreground_profile(x_space, star_brightness, lat, lon, bearing):
+def foreground_profile(x_space, star_brightness, lat, lon, bearing, alt_max):
     """Returns (heights, window_points): `heights` (same shape as
     `x_space`) to add on top of the real terrain baseline, and a list of
     (x, y) points -- in the same units, y relative to the *building's*
     own base -- for lit windows to scatter on urban/suburban tiers
-    (empty for tree/open-field tiers)."""
+    (empty for tree/open-field tiers).
+
+    Heights scale with `alt_max` (the "Max Altitude Shown" setting)
+    rather than being fixed degree values, so the foreground occupies a
+    consistent, deliberate fraction of the frame regardless of how
+    zoomed-in/out the current view is."""
     rng = _rng(lat, lon, bearing)
     span = x_space[-1] - x_space[0]
 
     if star_brightness <= 1.5:
         n = max(6, int(span / 3.0))
-        heights, edges, building_heights = _skyline(x_space, rng, n, min_height=3.0, max_height=7.0, tower_chance=0.15)
+        heights, edges, building_heights = _skyline(
+            x_space, rng, n, min_height=0.14 * alt_max, max_height=0.32 * alt_max, tower_chance=0.18
+        )
         windows = _window_points(rng, edges, building_heights, lit_fraction=0.35)
         return heights, windows
 
     if star_brightness <= 2.5:
         n = max(4, int(span / 5.0))
-        heights, edges, building_heights = _skyline(x_space, rng, n, min_height=1.2, max_height=3.0, tower_chance=0.05)
+        heights, edges, building_heights = _skyline(
+            x_space, rng, n, min_height=0.06 * alt_max, max_height=0.17 * alt_max, tower_chance=0.06
+        )
         windows = _window_points(rng, edges, building_heights, lit_fraction=0.15)
         return heights, windows
 
     if star_brightness <= 3.5:
-        return _tree_line(x_space, rng), []
+        return _tree_line(x_space, rng, alt_max), []
 
-    return _open_field(x_space, rng), []
+    return _open_field(x_space, rng, alt_max), []
