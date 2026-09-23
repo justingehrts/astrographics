@@ -48,6 +48,18 @@ def get_astronomy_data():
     with loader.open(hipparcos.URL) as f:
         stars_df = hipparcos.load_dataframe(f)
 
+    # Many fainter Hipparcos entries have an incomplete astrometric
+    # solution (blank parallax/proper-motion fields in the raw catalog,
+    # which hipparcos.load_dataframe parses as NaN). Skyfield's vectorized
+    # position/light-time calculations don't tolerate NaN inputs -- one
+    # such star pulled in by a high enough magnitude cutoff corrupts the
+    # whole batch and crashes deep in Skyfield's relativistic deflection
+    # code. Drop those rows up front rather than downstream of the crash.
+    stars_df = stars_df.dropna(subset=[
+        "ra_degrees", "dec_degrees", "parallax_mas",
+        "ra_mas_per_year", "dec_mas_per_year", "magnitude",
+    ])
+
     return ts, eph, stars_df
 
 
