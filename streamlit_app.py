@@ -15,7 +15,7 @@ from skyfield.api import wgs84, Star, Loader
 from skyfield.data import hipparcos
 from skyfield.magnitudelib import planetary_magnitude
 
-from astro import constellations, extinction, horizon, location, moon, sky_model, skyline
+from astro import constellations, extinction, horizon, location, moon, sky_model
 
 logger = logging.getLogger(__name__)
 
@@ -614,32 +614,21 @@ if st.button("Generate Sky Graphic", type="primary"):
                     logger.exception("Failed to draw constellation lines")
 
         # 6. HORIZON SILHOUETTE
-        # Real terrain baseline (from Open-Meteo elevation; flat if the
-        # lookup fails) plus a decorative foreground -- buildings, trees,
-        # or open field -- styled by the same urban/rural tiers as the
-        # Star Visibility Limit slider, so the horizon actually reflects
-        # "how light-polluted is this scene" rather than always looking
-        # like generic trees.
+        # Real terrain-derived horizon when the elevation lookup succeeds;
+        # falls back to the original procedural "suburban trees" shape
+        # (which is location-independent) if the API is slow/unavailable.
         x_silhouette_space = np.linspace(az_min, az_max, 400)
         try:
             sample_az, horizon_deg_samples = cached_horizon_profile(lat, lon, az_min, az_max)
-            terrain_baseline = np.interp(x_silhouette_space, sample_az, horizon_deg_samples)
+            y_silhouette = np.clip(np.interp(x_silhouette_space, sample_az, horizon_deg_samples), 0.3, alt_max)
         except Exception:
-            logger.exception("Terrain horizon lookup failed; using a flat baseline")
-            terrain_baseline = np.zeros_like(x_silhouette_space)
-
-        foreground_heights, window_points = skyline.foreground_profile(
-            x_silhouette_space, star_brightness, lat, lon, bearing, alt_max
-        )
-        y_silhouette = np.clip(terrain_baseline + foreground_heights, 0.3, alt_max)
+            logger.exception("Terrain horizon lookup failed; falling back to procedural silhouette")
+            base_ground = 4.0 + 1.0 * np.sin(x_silhouette_space / 5)
+            tree_canopy = 1.2 * np.sin(x_silhouette_space * 2.5) * np.cos(x_silhouette_space * 0.4)
+            fine_foliage = 0.5 * np.sin(x_silhouette_space * 12.0)
+            y_silhouette = np.clip(base_ground + tree_canopy + fine_foliage, 2.0, min(10.0, alt_max))
 
         ax.fill_between(x_silhouette_space, -5, y_silhouette, color="#060c14", zorder=100)
-
-        if window_points:
-            window_x = [wx for wx, _ in window_points]
-            window_base = np.interp(window_x, x_silhouette_space, terrain_baseline)
-            window_y = [base + wy for base, (_, wy) in zip(window_base, window_points)]
-            ax.scatter(window_x, window_y, s=1.5, color=skyline.WINDOW_LIT_COLOR, alpha=0.8, zorder=101)
 
         ax.grid(True, color=grid_color, alpha=0.15, linestyle='--', zorder=2)
 

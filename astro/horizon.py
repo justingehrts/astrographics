@@ -21,7 +21,6 @@ SAMPLE_DISTANCES_KM = (1, 3, 7, 15, 30, 60)
 ELEVATION_API_URL = "https://api.open-meteo.com/v1/elevation"
 REQUEST_TIMEOUT_S = 8
 _BATCH_SIZE = 500
-_SMOOTHING_WINDOW = 5
 
 
 def _destination(lat_deg, lon_deg, bearing_deg, distance_km):
@@ -55,20 +54,6 @@ def _query_elevations(lats, lons):
     return out
 
 
-def _smooth(profile, window=_SMOOTHING_WINDOW):
-    """Light moving-average smoothing across azimuth samples. Elevation
-    DEMs (including the Copernicus data Open-Meteo serves) capture real
-    small-scale noise -- individual trees, buildings, pixel artifacts --
-    that reads as visual jitter at this scale rather than a deliberate
-    shape. This softens that jitter while preserving genuine larger-scale
-    rises (hills, ridgelines)."""
-    if len(profile) < window:
-        return profile
-    kernel = np.ones(window) / window
-    padded = np.pad(profile, (window // 2, window // 2), mode="edge")
-    return np.convolve(padded, kernel, mode="valid")[:len(profile)]
-
-
 def fetch_horizon_profile(lat, lon, azimuths_deg):
     """Returns an array of horizon altitude angles (degrees, >= 0), one
     per azimuth in `azimuths_deg`, derived from real terrain elevation
@@ -97,4 +82,4 @@ def fetch_horizon_profile(lat, lon, azimuths_deg):
         angle_deg = np.degrees(np.arctan2(elev_m - observer_elev_m - drop_m, distance_m))
         horizon_deg[i] = max(horizon_deg[i], angle_deg)
 
-    return _smooth(np.clip(horizon_deg, 0.0, None))
+    return np.clip(horizon_deg, 0.0, None)
