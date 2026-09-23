@@ -389,7 +389,12 @@ if st.button("Generate Sky Graphic", type="primary"):
         h_shadow = np.degrees(np.arcsin(np.clip(np.sin(np.radians(sun_deg)) * np.cos(az_diff_rad), -1.0, 1.0)))
 
         belt_of_venus_mask = np.exp(-((Y_mesh - (h_shadow + 3.0)) / 3.0)**2) * np.clip((sun_deg + 5.0) / 5.0, 0, 1)
-        belt_of_venus_mask = np.where(h_shadow < 0, belt_of_venus_mask, 0)
+        # h_shadow depends only on azimuth (constant down each column), so
+        # a hard "h_shadow < 0" cutoff produces a sharp vertical seam
+        # wherever that boundary (90deg from the sun's azimuth) falls
+        # inside the current view. Fade smoothly across it instead.
+        antisolar_fade = 1.0 / (1.0 + np.exp(h_shadow / 8.0))
+        belt_of_venus_mask = belt_of_venus_mask * antisolar_fade
 
         twilight_sky_matrix[..., 0] += belt_of_venus_mask * 0.16
         twilight_sky_matrix[..., 1] += belt_of_venus_mask * 0.05
@@ -624,7 +629,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             terrain_baseline = np.zeros_like(x_silhouette_space)
 
         foreground_heights, window_points = skyline.foreground_profile(
-            x_silhouette_space, star_brightness, lat, lon, bearing
+            x_silhouette_space, star_brightness, lat, lon, bearing, alt_max
         )
         y_silhouette = np.clip(terrain_baseline + foreground_heights, 0.3, alt_max)
 
