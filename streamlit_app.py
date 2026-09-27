@@ -15,7 +15,7 @@ from skyfield.api import wgs84, Star, Loader
 from skyfield.data import hipparcos
 from skyfield.magnitudelib import planetary_magnitude
 
-from astro import constellations, extinction, horizon, location, moon, sky_model
+from astro import constellations, extinction, horizon, location, moon, sky_model, treeline
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,11 @@ def get_constellation_segments():
     return constellations.load_constellation_segments()
 
 
+@st.cache_resource
+def get_treeline_image():
+    return treeline.load_treeline_image()
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def cached_sky_defaults(lat, lon):
     return location.suggest_sky_defaults(lat, lon)
@@ -82,6 +87,7 @@ def cached_horizon_profile(lat, lon, az_min, az_max, n_samples=96):
 # Load the data models natively
 ts, eph, stars_df = get_astronomy_data()
 CONSTELLATION_SEGMENTS = get_constellation_segments()
+TREELINE_IMAGE = get_treeline_image()
 earth = eph['earth']
 sun = eph['sun']
 
@@ -615,20 +621,21 @@ if st.button("Generate Sky Graphic", type="primary"):
 
         # 6. HORIZON SILHOUETTE
         # Real terrain-derived horizon when the elevation lookup succeeds;
-        # falls back to the original procedural "suburban trees" shape
-        # (which is location-independent) if the API is slow/unavailable.
+        # falls back to a real tree-line image (astro/treeline.py, tiled
+        # and recolored to fit the current view) if the API is slow or
+        # unavailable, which is location-independent either way.
         x_silhouette_space = np.linspace(az_min, az_max, 400)
         try:
             sample_az, horizon_deg_samples = cached_horizon_profile(lat, lon, az_min, az_max)
             y_silhouette = np.clip(np.interp(x_silhouette_space, sample_az, horizon_deg_samples), 0.3, alt_max)
+            ax.fill_between(x_silhouette_space, -5, y_silhouette, color="#060c14", zorder=100)
         except Exception:
-            logger.exception("Terrain horizon lookup failed; falling back to procedural silhouette")
-            base_ground = 4.0 + 1.0 * np.sin(x_silhouette_space / 5)
-            tree_canopy = 1.2 * np.sin(x_silhouette_space * 2.5) * np.cos(x_silhouette_space * 0.4)
-            fine_foliage = 0.5 * np.sin(x_silhouette_space * 12.0)
-            y_silhouette = np.clip(base_ground + tree_canopy + fine_foliage, 2.0, min(10.0, alt_max))
-
-        ax.fill_between(x_silhouette_space, -5, y_silhouette, color="#060c14", zorder=100)
+            logger.exception("Terrain horizon lookup failed; falling back to tree-line image")
+            treeline_seed = int(abs(lat * 10007 + lon * 7919 + bearing * 104729)) % (2 ** 32)
+            treeline_rgba, treeline_extent = treeline.tiled_treeline(
+                TREELINE_IMAGE, az_min, az_max, alt_max, treeline_seed
+            )
+            ax.imshow(treeline_rgba, extent=treeline_extent, aspect="auto", zorder=100)
 
         ax.grid(True, color=grid_color, alpha=0.15, linestyle='--', zorder=2)
 
