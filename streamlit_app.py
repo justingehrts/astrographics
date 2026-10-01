@@ -331,6 +331,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         sun_az_deg = sun_az.degrees
 
         fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, facecolor='none')
+        ax.set_position([0, 0, 1, 1])  # full-bleed: no default subplot margins around the sky
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, alt_max)
 
@@ -651,7 +652,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         st.pyplot(fig)
 
         img_buf = io.BytesIO()
-        fig.savefig(img_buf, format="png", dpi=150, facecolor="none", edgecolor="none", pad_inches=0.0)
+        fig.savefig(img_buf, format="png", dpi=150, facecolor="none", edgecolor="none", bbox_inches="tight", pad_inches=0.0)
         img_buf.seek(0)
 
         st.download_button(label="💾 Download High-Res PNG for Editing / On-Air", data=img_buf, file_name=f"custom_sky_{bearing:.0f}deg.png", mime="image/png")
