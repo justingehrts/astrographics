@@ -1,11 +1,19 @@
-"""Real tree-line silhouette image, used for the horizon when the real
-terrain elevation lookup (astro/horizon.py) fails or isn't location-
-specific enough to draw on its own.
+"""Real tree-line/houses-line silhouette images, used for the horizon when
+the real terrain elevation lookup (astro/horizon.py) fails or isn't
+location-specific enough to draw on its own. Two variants are available --
+a plain tree-line (data/tree_line_silhouette.png) and a suburban
+houses+trees mix (data/houses_treeline_silhouette.png) -- and the caller
+picks between them based on how light-polluted the current view is (the
+houses variant for urban/suburban skies, the plain tree-line for rural
+ones), since the former realistically wouldn't be the horizon for a dark
+rural sky.
 
-The source image (data/tree_line_silhouette.png) was AI-generated
-(Gemini/ImageFX), with its visible "AI-generated" corner badge cropped
-out and the empty transparent sky trimmed off, then downsampled for
-reasonable tiling memory use.
+The source images were AI-generated (Gemini/ImageFX). The tree-line image
+had its visible "AI-generated" corner badge cropped out and the empty
+transparent sky trimmed off, then was downsampled for reasonable tiling
+memory use. The houses+trees image had no badge; it was cropped to its
+sharper of two generated variants and had its white background keyed to
+transparency by luminance.
 
 Since the image has a fixed pixel width but the app's field of view is
 user-adjustable (30-180deg), it's tiled horizontally to cover whatever
@@ -30,19 +38,28 @@ import matplotlib.image as mpimg
 import numpy as np
 
 _IMAGE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "tree_line_silhouette.png")
+_HOUSES_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "houses_treeline_silhouette.png")
 
 SILHOUETTE_COLOR_RGB = (6 / 255.0, 12 / 255.0, 20 / 255.0)  # matches the app's #060c14 foreground color
 
 # A distant treeline realistically subtends about this many degrees.
-# Fixed regardless of alt_max -- see the module docstring.
+# Fixed regardless of alt_max -- see the module docstring. Shared by both
+# image variants for visual consistency when switching between them.
 TREE_HEIGHT_DEG = 10.0
 
 
 def load_treeline_image():
-    """Loads the source RGBA image as a float array in [0, 1]. Callers
-    should cache this (e.g. via st.cache_resource) -- it's static data,
-    loaded from disk once."""
+    """Loads the plain tree-line source RGBA image as a float array in
+    [0, 1]. Callers should cache this (e.g. via st.cache_resource) -- it's
+    static data, loaded from disk once."""
     return mpimg.imread(_IMAGE_PATH)
+
+
+def load_houses_treeline_image():
+    """Loads the suburban houses+trees source RGBA image as a float array
+    in [0, 1]. Callers should cache this (e.g. via st.cache_resource) --
+    it's static data, loaded from disk once."""
+    return mpimg.imread(_HOUSES_IMAGE_PATH)
 
 
 def _recolored(rgba):
