@@ -33,9 +33,9 @@ _IMAGE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "tree_line_s
 
 SILHOUETTE_COLOR_RGB = (6 / 255.0, 12 / 255.0, 20 / 255.0)  # matches the app's #060c14 foreground color
 
-# A distant treeline realistically subtends only a few degrees. Fixed
-# regardless of alt_max -- see the module docstring.
-TREE_HEIGHT_DEG = 4.0
+# A distant treeline realistically subtends about this many degrees.
+# Fixed regardless of alt_max -- see the module docstring.
+TREE_HEIGHT_DEG = 10.0
 
 
 def load_treeline_image():

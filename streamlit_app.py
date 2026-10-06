@@ -113,6 +113,27 @@ def normalize_az(az, az_min, az_max):
     return result
 
 
+COMPASS_16 = [
+    "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+    "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+]
+
+
+def compass_ticks(az_min, az_max):
+    """Returns [(az, label), ...] for each of the 16 compass points that
+    falls inside [az_min, az_max], in whichever +-360deg-shifted form
+    actually lands in that window (same wraparound az_min/az_max can
+    have as normalize_az handles for plotted bodies)."""
+    start_k = int(np.floor(az_min / 22.5)) - 1
+    end_k = int(np.ceil(az_max / 22.5)) + 1
+    ticks = []
+    for k in range(start_k, end_k + 1):
+        az = k * 22.5
+        if az_min <= az <= az_max:
+            ticks.append((az, COMPASS_16[k % 16]))
+    return ticks
+
+
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("1. Observation Settings")
 
@@ -285,6 +306,8 @@ show_labels = st.sidebar.checkbox("Show Planet/Moon Labels", value=True)
 show_major_star_labels = st.sidebar.checkbox("Show Major Star Labels", value=True)
 show_minor_star_labels = st.sidebar.checkbox("Show Minor Star Labels", value=False)
 show_constellations = st.sidebar.checkbox("Show Constellation Lines", value=True)
+show_altitude_gridlines = st.sidebar.checkbox("Show Altitude Gridlines", value=False)
+show_compass_lines = st.sidebar.checkbox("Show Compass Direction Lines", value=False)
 
 # Persist the full view in the URL so a generated graphic is shareable/bookmarkable.
 st.query_params["lat"] = f"{lat:.2f}"
@@ -638,10 +661,18 @@ if st.button("Generate Sky Graphic", type="primary"):
             )
             ax.imshow(treeline_rgba, extent=treeline_extent, aspect="auto", zorder=100)
 
-        ax.grid(True, color=grid_color, alpha=0.15, linestyle='--', zorder=2)
+        # Reference overlays are opt-in and drawn manually (axhline/axvline
+        # + text), matching how every other label in this chart is drawn --
+        # native tick labels are never used, since both axes stay hidden.
+        if show_altitude_gridlines:
+            for alt_tick in np.arange(10, alt_max, 10):
+                ax.axhline(alt_tick, color=grid_color, alpha=0.2, linestyle='--', linewidth=0.8, zorder=2)
+                ax.text(az_min + 0.5, alt_tick + 0.3, f"{int(alt_tick)}°", color=grid_color, fontsize=9, alpha=0.6, zorder=3)
 
-        ax.set_xticks(np.arange(az_min, az_max + 1, 10))
-        ax.set_yticks(np.arange(0, alt_max + 1, 10))
+        if show_compass_lines:
+            for compass_az, compass_label in compass_ticks(az_min, az_max):
+                ax.axvline(compass_az, color=grid_color, alpha=0.2, linestyle='--', linewidth=0.8, zorder=2)
+                ax.text(compass_az, alt_max - 1.5, compass_label, color=grid_color, ha='center', fontsize=9, alpha=0.6, zorder=3)
 
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)
