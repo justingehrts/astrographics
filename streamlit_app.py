@@ -73,6 +73,11 @@ def get_treeline_image():
     return treeline.load_treeline_image()
 
 
+@st.cache_resource
+def get_houses_treeline_image():
+    return treeline.load_houses_treeline_image()
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def cached_sky_defaults(lat, lon):
     return location.suggest_sky_defaults(lat, lon)
@@ -88,6 +93,7 @@ def cached_horizon_profile(lat, lon, az_min, az_max, n_samples=96):
 ts, eph, stars_df = get_astronomy_data()
 CONSTELLATION_SEGMENTS = get_constellation_segments()
 TREELINE_IMAGE = get_treeline_image()
+HOUSES_TREELINE_IMAGE = get_houses_treeline_image()
 earth = eph['earth']
 sun = eph['sun']
 
@@ -645,9 +651,12 @@ if st.button("Generate Sky Graphic", type="primary"):
 
         # 6. HORIZON SILHOUETTE
         # Real terrain-derived horizon when the elevation lookup succeeds;
-        # falls back to a real tree-line image (astro/treeline.py, tiled
-        # and recolored to fit the current view) if the API is slow or
-        # unavailable, which is location-independent either way.
+        # falls back to a tiled silhouette image (astro/treeline.py) if
+        # the API is slow or unavailable, which is location-independent
+        # either way. The fallback picks between a suburban houses+trees
+        # mix (lower Star Visibility Limit -- urban/suburban skies, where
+        # houses would realistically be part of the horizon) and a plain
+        # tree-line (higher Star Visibility Limit -- rural skies).
         x_silhouette_space = np.linspace(az_min, az_max, 400)
         try:
             sample_az, horizon_deg_samples = cached_horizon_profile(lat, lon, az_min, az_max)
@@ -656,8 +665,9 @@ if st.button("Generate Sky Graphic", type="primary"):
         except Exception:
             logger.exception("Terrain horizon lookup failed; falling back to tree-line image")
             treeline_seed = int(abs(lat * 10007 + lon * 7919 + bearing * 104729)) % (2 ** 32)
+            treeline_source = HOUSES_TREELINE_IMAGE if star_brightness <= 2.5 else TREELINE_IMAGE
             treeline_rgba, treeline_extent = treeline.tiled_treeline(
-                TREELINE_IMAGE, az_min, az_max, treeline_seed
+                treeline_source, az_min, az_max, treeline_seed
             )
             ax.imshow(treeline_rgba, extent=treeline_extent, aspect="auto", zorder=100)
 
