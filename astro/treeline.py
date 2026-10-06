@@ -47,6 +47,17 @@ SILHOUETTE_COLOR_RGB = (6 / 255.0, 12 / 255.0, 20 / 255.0)  # matches the app's 
 # image variants for visual consistency when switching between them.
 TREE_HEIGHT_DEG = 10.0
 
+# The houses+trees source image's individual houses measured out to only
+# ~3deg median width when tiled at TREE_HEIGHT_DEG (automated roofline-
+# width measurement: segmenting the top-of-silhouette height profile into
+# smooth/house-like vs. jagged/tree-like runs by local roughness). The
+# same implied viewing distance that calibrates TREE_HEIGHT_DEG (a ~15-20m
+# tree at 10deg) puts a realistic ~9-12m house frontage at ~6deg -- about
+# double. This horizontal-only stretch corrects for that; it does widen
+# the trees in this image too, which is an accepted trade-off rather than
+# re-deriving a per-shape scale.
+HOUSES_WIDTH_SCALE = 1.9
+
 
 def load_treeline_image():
     """Loads the plain tree-line source RGBA image as a float array in
@@ -70,17 +81,21 @@ def _recolored(rgba):
     return out
 
 
-def tiled_treeline(source_rgba, az_min, az_max, seed):
+def tiled_treeline(source_rgba, az_min, az_max, seed, width_scale=1.0):
     """Returns (rgba_array, extent) ready to hand straight to
     `ax.imshow(rgba_array, extent=extent, ...)`: a horizontally tiled,
     recolored strip of the source tree image sized to cover
     [az_min, az_max] at a fixed angular height (TREE_HEIGHT_DEG),
-    independent of alt_max -- see the module docstring for why."""
+    independent of alt_max -- see the module docstring for why.
+
+    `width_scale` stretches the tiling horizontally only (height is
+    unaffected) -- see HOUSES_WIDTH_SCALE below for why the houses
+    variant needs this."""
     h, w = source_rgba.shape[:2]
     aspect = w / h
 
     tile_height_deg = TREE_HEIGHT_DEG
-    tile_width_deg = tile_height_deg * aspect
+    tile_width_deg = tile_height_deg * aspect * width_scale
     px_per_deg = w / tile_width_deg
 
     span = az_max - az_min

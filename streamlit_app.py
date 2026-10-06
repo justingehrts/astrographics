@@ -675,9 +675,11 @@ if st.button("Generate Sky Graphic", type="primary"):
         except Exception:
             logger.exception("Terrain horizon lookup failed; falling back to tree-line image")
             treeline_seed = int(abs(lat * 10007 + lon * 7919 + bearing * 104729)) % (2 ** 32)
-            treeline_source = HOUSES_TREELINE_IMAGE if star_brightness <= 2.5 else TREELINE_IMAGE
+            is_houses_variant = star_brightness <= 2.5
+            treeline_source = HOUSES_TREELINE_IMAGE if is_houses_variant else TREELINE_IMAGE
+            treeline_width_scale = treeline.HOUSES_WIDTH_SCALE if is_houses_variant else 1.0
             treeline_rgba, treeline_extent = treeline.tiled_treeline(
-                treeline_source, az_min, az_max, treeline_seed
+                treeline_source, az_min, az_max, treeline_seed, width_scale=treeline_width_scale
             )
             ax.imshow(treeline_rgba, extent=treeline_extent, aspect="auto", zorder=100)
 
