@@ -7,6 +7,7 @@ matplotlib.use("Agg")  # Safe headless execution for cloud servers
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import matplotlib.patches as patches
+import matplotlib.patheffects as patheffects
 import io
 import numpy as np
 
@@ -448,7 +449,16 @@ if st.button("Generate Sky Graphic", type="primary"):
 
         bg_image = np.clip(bg_image, 0.0, 1.0)
 
-        grid_color = "#ffffff" if sun_deg > 0 else ("#475569" if sun_deg > -6.0 else "#334155")
+        # Reference-overlay styling (altitude gridlines, compass lines):
+        # needs to stay legible against both a bright daytime sky and a
+        # near-black night sky, so rather than guess a single muted hue
+        # per regime, pick a contrasting fill + an opposite-toned outline
+        # stroke -- dark-on-light for day, light-on-dark for night/twilight.
+        if sun_deg > 0:
+            grid_line_color, grid_text_color, grid_stroke_color = "#1e293b", "#1e293b", "#ffffff"
+        else:
+            grid_line_color, grid_text_color, grid_stroke_color = "#e2e8f0", "#e2e8f0", "#0a0f18"
+        grid_outline = [patheffects.withStroke(linewidth=1.6, foreground=grid_stroke_color, alpha=0.9)]
 
         ax.imshow(
             bg_image,
@@ -666,13 +676,17 @@ if st.button("Generate Sky Graphic", type="primary"):
         # native tick labels are never used, since both axes stay hidden.
         if show_altitude_gridlines:
             for alt_tick in np.arange(10, alt_max, 10):
-                ax.axhline(alt_tick, color=grid_color, alpha=0.2, linestyle='--', linewidth=0.8, zorder=2)
-                ax.text(az_min + 0.5, alt_tick + 0.3, f"{int(alt_tick)}°", color=grid_color, fontsize=9, alpha=0.6, zorder=3)
+                ax.axhline(alt_tick, color=grid_line_color, alpha=0.75, linestyle='--',
+                           linewidth=1.1, path_effects=grid_outline, zorder=2)
+                ax.text(az_min + 0.5, alt_tick + 0.3, f"{int(alt_tick)}°", color=grid_text_color,
+                        fontsize=9, alpha=0.95, path_effects=grid_outline, zorder=3)
 
         if show_compass_lines:
             for compass_az, compass_label in compass_ticks(az_min, az_max):
-                ax.axvline(compass_az, color=grid_color, alpha=0.2, linestyle='--', linewidth=0.8, zorder=2)
-                ax.text(compass_az, alt_max - 1.5, compass_label, color=grid_color, ha='center', fontsize=9, alpha=0.6, zorder=3)
+                ax.axvline(compass_az, color=grid_line_color, alpha=0.75, linestyle='--',
+                           linewidth=1.1, path_effects=grid_outline, zorder=2)
+                ax.text(compass_az, alt_max - 1.5, compass_label, color=grid_text_color, ha='center',
+                        fontsize=9, alpha=0.95, path_effects=grid_outline, zorder=3)
 
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)
