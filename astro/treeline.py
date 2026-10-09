@@ -1,6 +1,6 @@
-"""Real tree-line/houses-line silhouette images, used for the horizon when
-the real terrain elevation lookup (astro/horizon.py) fails or isn't
-location-specific enough to draw on its own. Two variants are available --
+"""Real tree-line/houses-line silhouette images: the nearby foreground of
+the horizon, drawn in front of the distant terrain profile from
+astro/horizon.py (or alone when that lookup fails). Two variants are available --
 a plain tree-line (data/tree_line_silhouette.png) and a suburban
 houses+trees mix (data/houses_treeline_silhouette.png) -- and the caller
 picks between them based on how light-polluted the current view is (the
@@ -113,3 +113,17 @@ def tiled_treeline(source_rgba, az_min, az_max, seed, width_scale=1.0):
 
     extent = [az_min, az_max, 0, tile_height_deg]
     return cropped, extent
+
+
+def silhouette_top_profile(rgba, extent, opaque_alpha=0.5):
+    """(azimuths, heights_deg) of the silhouette's top edge per pixel
+    column of a `tiled_treeline` result -- how high the foreground blocks
+    the sky at each azimuth. Row 0 is the top of the image (imshow's
+    default 'upper' origin, as the app draws it)."""
+    az_min, az_max, _, top_deg = extent
+    h, w = rgba.shape[:2]
+    opaque = rgba[..., 3] > opaque_alpha
+    first_opaque_row = np.where(opaque.any(axis=0), opaque.argmax(axis=0), h)
+    heights = (h - first_opaque_row) / h * top_deg
+    azimuths = az_min + (np.arange(w) + 0.5) / w * (az_max - az_min)
+    return azimuths, heights
