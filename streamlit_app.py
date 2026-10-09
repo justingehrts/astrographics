@@ -87,13 +87,8 @@ def get_constellation_segments():
 
 
 @st.cache_resource
-def get_treeline_image():
-    return treeline.load_treeline_image()
-
-
-@st.cache_resource
-def get_houses_treeline_image():
-    return treeline.load_houses_treeline_image()
+def get_horizon_strips(scene):
+    return treeline.load_scene_strips(scene)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -128,8 +123,6 @@ def cached_sky(az_min, az_max, alt_max, sun_alt, sun_az, turbidity, star_visibil
 # Load the data models natively
 ts, eph, stars_df = get_astronomy_data()
 CONSTELLATION_SEGMENTS = get_constellation_segments()
-TREELINE_IMAGE = get_treeline_image()
-HOUSES_TREELINE_IMAGE = get_houses_treeline_image()
 earth = eph['earth']
 sun = eph['sun']
 
@@ -546,9 +539,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         # lookup succeeds), and the nearby tree/house silhouette in front of
         # it. Their union is what an observer sees -- foreground trees hide
         # low distant terrain, and mountains taller than the trees rise
-        # above them. The foreground picks a suburban houses+trees mix for
-        # lower Star Visibility Limits (urban/suburban skies) and a plain
-        # tree-line for higher ones (rural skies).
+        # above them. The foreground scene (city, suburb or countryside)
+        # follows the Star Visibility Limit.
         x_silhouette_space = np.linspace(az_min, az_max, 400)
         try:
             sample_az, horizon_deg_samples = cached_horizon_profile(lat, lon, az_min, az_max)
@@ -558,11 +550,9 @@ if st.button("Generate Sky Graphic", type="primary"):
             terrain_top = None
 
         treeline_seed = int(abs(lat * 10007 + lon * 7919 + bearing * 104729)) % (2 ** 32)
-        is_houses_variant = star_brightness <= 2.5
-        treeline_source = HOUSES_TREELINE_IMAGE if is_houses_variant else TREELINE_IMAGE
-        treeline_width_scale = treeline.HOUSES_WIDTH_SCALE if is_houses_variant else 1.0
         treeline_rgba, treeline_extent = treeline.tiled_treeline(
-            treeline_source, az_min, az_max, treeline_seed, width_scale=treeline_width_scale
+            get_horizon_strips(treeline.scene_for_visibility(star_brightness)),
+            az_min, az_max, treeline_seed,
         )
 
         _fg_az, _fg_top = treeline.silhouette_top_profile(treeline_rgba, treeline_extent)
