@@ -16,7 +16,7 @@ from skyfield.api import wgs84, Star, Loader
 from skyfield.data import hipparcos
 from skyfield.magnitudelib import planetary_magnitude
 
-from astro import constellations, extinction, horizon, location, moon, sky_model, stars, treeline
+from astro import atmosphere, constellations, extinction, horizon, location, moon, stars, treeline
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,24 @@ def cached_sky_defaults(lat, lon):
 def cached_horizon_profile(lat, lon, az_min, az_max, n_samples=96):
     sample_az = np.linspace(az_min, az_max, n_samples)
     return sample_az, horizon.fetch_horizon_profile(lat, lon, sample_az)
+
+
+SKY_GRID_W, SKY_GRID_H = 150, 100
+
+
+@st.cache_data(max_entries=64, show_spinner=False)
+def cached_sky(az_min, az_max, alt_max, sun_alt, sun_az, turbidity, star_visibility,
+               moon_alt_deg=None, moon_az_deg=None, moon_phase_angle_deg=None, moon_distance_km=None):
+    """Sky background for the view: (display RGB image, luminance in cd/m^2
+    per pixel, moonless/unpolluted zenith luminance for star visibility)."""
+    X, Y = np.meshgrid(np.linspace(az_min, az_max, SKY_GRID_W), np.linspace(0, alt_max, SKY_GRID_H))
+    sky = atmosphere.compute_sky(
+        Y, X, sun_alt, sun_az, turbidity, star_visibility,
+        moon_alt_deg=moon_alt_deg, moon_az_deg=moon_az_deg,
+        moon_phase_angle_deg=moon_phase_angle_deg, moon_distance_km=moon_distance_km,
+    )
+    display = atmosphere.to_display(sky["rgb"], sky["zenith_total"], atmosphere.display_saturation(sun_alt))
+    return display, sky["luminance"], sky["zenith_dark"]
 
 
 # Load the data models natively
@@ -391,6 +409,29 @@ def draw_disk_glow(ax, x, y, r_x, r_y, rgb, peak_alpha, extent_radii, zorder):
               origin="lower", aspect="auto", interpolation="bilinear", zorder=zorder)
 
 
+# The real Sun is dimmer and warmer toward its edge (limb darkening; the
+# visible-light coefficient is ~0.6, tempered here so the disk still reads
+# as brilliant). Besides being accurate, the warmer rim gives the disk a
+# defined edge against the pale glare of the sky around it.
+SUN_LIMB_DARKENING = 0.25
+SUN_LIMB_WARM_TINT = np.array([1.0, 0.78, 0.42])
+
+
+def draw_limb_darkened_disk(ax, x, y, r_x, r_y, rgb, zorder):
+    u = np.linspace(-1.0, 1.0, 128)
+    U, V = np.meshgrid(u, u)
+    r = np.hypot(U, V)
+    mu = np.sqrt(np.clip(1.0 - r * r, 0.0, 1.0))
+    toward_limb = (1.0 - mu)[..., None]
+    intensity = 1.0 - SUN_LIMB_DARKENING * toward_limb
+    tint = 1.0 - toward_limb * (1.0 - SUN_LIMB_WARM_TINT)
+    disk = np.zeros(U.shape + (4,))
+    disk[..., :3] = np.clip(np.asarray(rgb) * intensity * tint, 0.0, 1.0)
+    disk[..., 3] = np.clip((1.0 - r) / 0.03, 0.0, 1.0)  # anti-aliased edge
+    ax.imshow(disk, extent=[x - r_x, x + r_x, y - r_y, y + r_y],
+              origin="lower", aspect="auto", interpolation="bilinear", zorder=zorder)
+
+
 # --- GRAPHIC GENERATION LOGIC ---
 if st.button("Generate Sky Graphic", type="primary"):
     with st.spinner("Computing high-fidelity directional sky model and celestial structures..."):
@@ -413,101 +454,29 @@ if st.button("Generate Sky Graphic", type="primary"):
 
         # ======================================================================
         # SECTION 3: SKY BACKGROUND
-        # Clear-daytime color comes from the Preetham analytic sky model
-        # (astro/sky_model.py); twilight/night, which that model doesn't
-        # cover, keep a hand-authored gradient + "Belt of Venus" treatment.
+        # One physically-based model (astro/atmosphere.py) for day, sunset,
+        # twilight and night: sunlight and moonlight scattered by air, haze
+        # and ozone around a spherical Earth, plus natural airglow and
+        # light-pollution skyglow. Sunset color, Earth's shadow and the Belt
+        # of Venus come out of the geometry rather than being painted on.
         # ======================================================================
-        x_pixels, y_pixels = 150, 100
-        x_space = np.linspace(az_min, az_max, x_pixels)
-        y_space = np.linspace(0, alt_max, y_pixels)
-        X_mesh, Y_mesh = np.meshgrid(x_space, y_space)
+        moon_sky_kwargs = {}
+        try:
+            moon_for_sky = observer_loc.at(t).observe(eph['moon']).apparent()
+            ms_alt, ms_az, ms_distance = moon_for_sky.altaz(temperature_C=STANDARD_TEMPERATURE_C, pressure_mbar=STANDARD_PRESSURE_MBAR)
+            # The Moon's phase angle is ~180deg minus its elongation from the Sun.
+            moon_sky_kwargs = dict(
+                moon_alt_deg=float(ms_alt.degrees), moon_az_deg=float(ms_az.degrees),
+                moon_phase_angle_deg=180.0 - float(moon_for_sky.separation_from(sun_apparent).degrees),
+                moon_distance_km=float(ms_distance.km),
+            )
+        except Exception:
+            logger.exception("Moon position for sky brightness failed; rendering without moonlight")
 
-        rad_az_mesh = np.radians(X_mesh)
-        rad_alt_mesh = np.radians(Y_mesh)
-        rad_sun_az = np.radians(sun_az_deg)
-        rad_sun_alt = np.radians(sun_deg)
-
-        cos_scatter_angle = (np.sin(rad_alt_mesh) * np.sin(rad_sun_alt) +
-                             np.cos(rad_alt_mesh) * np.cos(rad_sun_alt) * np.cos(rad_az_mesh - rad_sun_az))
-        gamma_rad = np.arccos(np.clip(cos_scatter_angle, -1.0, 1.0))  # angular distance to the sun
-        theta_rad = np.radians(90.0 - Y_mesh)  # zenith angle of each sky point
-
-        day_sky_matrix = sky_model.daytime_sky_rgb(theta_rad, gamma_rad, sun_deg, turbidity)
-
-        sun_alt_clamped = max(0.1, sun_deg)
-        extinction_R, extinction_G, extinction_B = extinction.rgb_transmission(sun_alt_clamped, turbidity)
-
-        # TURBIDITY 3: Calculate the global haze desaturation factor
-        haze_blend = np.clip((turbidity - 1.0) / 4.0, 0, 1)
-
-        base_navy = np.array([10, 16, 28]) / 255.0
-        haze_navy = np.array([25, 30, 40]) / 255.0
-        color_space_navy = base_navy * (1.0 - haze_blend) + haze_navy * haze_blend
-
-        base_twilight = np.array([20, 45, 95]) / 255.0
-        haze_twilight = np.array([45, 50, 60]) / 255.0
-        color_twilight_base = base_twilight * (1.0 - haze_blend) + haze_twilight * haze_blend
-
-        base_night = np.array([11, 17, 30]) / 255.0
-        haze_night = np.array([20, 22, 28]) / 255.0
-        color_night_base = base_night * (1.0 - haze_blend) + haze_night * haze_blend
-
-        sun_filtered_R = 1.0 * extinction_R
-        sun_filtered_G = 0.92 * extinction_G
-        sun_filtered_B = 0.78 * extinction_B
-        color_sunset_glow = np.array([sun_filtered_R, sun_filtered_G, sun_filtered_B])
-
-        v_frac = Y_mesh / alt_max
-
-        mie_width = 30.0 + (turbidity * 10.0)
-        f_scatter = np.exp(-(np.degrees(gamma_rad) / mie_width) ** 2)
-
-        twilight_horiz_glow = color_sunset_glow[None, None, :] * f_scatter[..., None] * (1.0 - v_frac[..., None]) * 0.90
-        twilight_upper_sky = color_space_navy[None, None, :] * v_frac[..., None] + color_twilight_base[None, None, :] * (1.0 - v_frac[..., None])
-        twilight_sky_matrix = np.clip(twilight_horiz_glow + twilight_upper_sky, 0, 1)
-
-        night_sky_matrix = color_space_navy[None, None, :] * v_frac[..., None] + color_night_base[None, None, :] * (1.0 - v_frac[..., None])
-
-        # Earth's shadow + Belt of Venus, opposite the sun around sunset/
-        # sunrise: a dark blue-grey band rising from the anti-solar horizon
-        # to about the sun's depression angle, with a pink band of
-        # backscattered, reddened sunlight just above it.
-        az_diff_rad = np.radians(X_mesh - sun_az_deg)
-        h_shadow = np.degrees(np.arcsin(np.clip(np.sin(np.radians(sun_deg)) * np.cos(az_diff_rad), -1.0, 1.0)))
-        shadow_top_deg = np.maximum(h_shadow, 0.0)
-        # Falls to zero, with zero slope, 90deg either side of the
-        # anti-solar azimuth -- a hard cutoff there shows as a vertical seam.
-        antisolar_weight = np.clip(-np.cos(az_diff_rad), 0.0, 1.0) ** 1.5
-        # Appears at sunset, strongest from about -2 to -4, gone by -7.
-        belt_activity = np.clip((1.0 - sun_deg) / 3.0, 0, 1) * np.clip((sun_deg + 7.0) / 4.0, 0, 1)
-        belt_weight = antisolar_weight * belt_activity
-
-        earth_shadow_mask = belt_weight / (1.0 + np.exp((Y_mesh - shadow_top_deg) / 0.8))
-        # The belt sits roughly 5-20deg up, above the shadow's top edge.
-        belt_of_venus_mask = belt_weight * np.exp(-((Y_mesh - (shadow_top_deg + 8.0)) / 5.0) ** 2)
-
-        twilight_sky_matrix *= (1.0 - 0.35 * earth_shadow_mask)[..., None]
-        twilight_sky_matrix[..., 0] += belt_of_venus_mask * 0.22
-        twilight_sky_matrix[..., 1] += belt_of_venus_mask * 0.09
-        twilight_sky_matrix[..., 2] += belt_of_venus_mask * 0.12
-
-        # Perceptual lift for the hand-authored twilight/night gradients
-        # (the day sky is already tone-mapped inside sky_model.daytime_sky_rgb).
-        gamma_exponent = np.clip(1.0 + (sun_deg + 12.0) / 18.0, 1.0, 2.0)
-        twilight_sky_matrix = np.clip(twilight_sky_matrix, 0.0, 1.0) ** (1.0 / gamma_exponent)
-        night_sky_matrix = np.clip(night_sky_matrix, 0.0, 1.0) ** (1.0 / gamma_exponent)
-
-        if sun_deg > 2.0:
-            bg_image = day_sky_matrix
-        elif sun_deg >= -2.0:
-            fade_weight = np.clip((sun_deg + 2.0) / 4.0, 0, 1)
-            bg_image = day_sky_matrix * fade_weight + twilight_sky_matrix * (1.0 - fade_weight)
-        else:
-            raw_fade = np.clip((sun_deg + 14.0) / 12.0, 0, 1)
-            fade_twilight_to_night = np.power(raw_fade, 0.6)
-            bg_image = twilight_sky_matrix * fade_twilight_to_night + night_sky_matrix * (1.0 - fade_twilight_to_night)
-
-        bg_image = np.clip(bg_image, 0.0, 1.0)
+        sky_display, sky_luminance, sky_zenith_dark = cached_sky(
+            az_min, az_max, alt_max, sun_deg, sun_az_deg, turbidity, star_brightness, **moon_sky_kwargs
+        )
+        ax.imshow(sky_display, extent=[az_min, az_max, 0, alt_max], origin="lower", aspect="auto", zorder=0)
 
         # Reference-overlay styling (altitude gridlines, compass lines):
         # needs to stay legible against both a bright daytime sky and a
@@ -520,39 +489,22 @@ if st.button("Generate Sky Graphic", type="primary"):
             grid_line_color, grid_text_color, grid_stroke_color = "#e2e8f0", "#e2e8f0", "#0a0f18"
         grid_outline = [patheffects.withStroke(linewidth=1.6, foreground=grid_stroke_color, alpha=0.9)]
 
-        ax.imshow(
-            bg_image,
-            extent=[az_min, az_max, 0, alt_max],
-            origin="lower",
-            aspect="auto",
-            zorder=0
-        )
-
-        # --- ENGINE: MODERN LED HORIZONTAL CITY GLOW DOME ---
-        if star_brightness <= 1.5 and sun_deg <= 0:
-            x_glow, y_glow = 200, 100
-            x_g_space = np.linspace(az_min, az_max, x_glow)
-            y_g_space = np.linspace(0, alt_max, y_glow)
-            X_m, Y_m = np.meshgrid(x_g_space, y_g_space)
-
-            center_az = (az_min + az_max) / 2.0
-            gaussian_glow = np.exp(-((X_m - center_az) / 70.0)**2 - (Y_m / 10.0)**2)
-            glow_base_color = "#fbf8f0" if star_brightness == 1.0 else "#f4efe2"
-
-            rgba_glow = np.zeros((y_glow, x_glow, 4))
-            rgba_glow[..., :3] = matplotlib.colors.to_rgb(glow_base_color)
-            rgba_glow[..., 3] = gaussian_glow * 0.28
-
-            ax.imshow(
-                rgba_glow, extent=[az_min, az_max, 0, alt_max], origin="lower",
-                aspect="auto", zorder=1, interpolation="bilinear"
-            )
-
-        # How faint an object the sky brightness allows, from daylight
-        # through twilight to full dark (the Star Visibility Limit slider
-        # caps this further for stars only -- it represents light pollution
-        # and declutter, which shouldn't hide planets).
+        # Faintest magnitude visible at each point in the sky. Twilight onset
+        # stays anchored to the empirical sun-altitude table (the eye does
+        # better in bright twilight than the standard sky-brightness formula
+        # predicts); on top of that, anything making a spot brighter than a
+        # moonless, unpolluted sky -- the Moon and its glow, light pollution,
+        # the bright twilight arch -- lowers the limit there by the same
+        # amount the sky-brightness formula says it should.
         twilight_limit = stars.twilight_limiting_magnitude(sun_deg)
+        dark_reference_limit = atmosphere.naked_eye_limit(sky_zenith_dark)
+
+        def limiting_magnitude_at(az, alt):
+            ix = np.round((np.asarray(az, dtype=float) - az_min) / (az_max - az_min) * (SKY_GRID_W - 1))
+            iy = np.round(np.asarray(alt, dtype=float) / alt_max * (SKY_GRID_H - 1))
+            ix = np.clip(ix, 0, SKY_GRID_W - 1).astype(int)
+            iy = np.clip(iy, 0, SKY_GRID_H - 1).astype(int)
+            return twilight_limit - (dark_reference_limit - atmosphere.naked_eye_limit(sky_luminance[iy, ix]))
 
         # Horizon geometry, computed up front (drawn in section 6) so labels
         # can skip objects hidden behind it. Two layers, both rising from
@@ -605,8 +557,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             sun_rgb = 1.0 - reddening * (1.0 - sun_tint)
             draw_disk_glow(ax, sun_plot_az, sun_deg, sun_r_x, sun_r_y, sun_rgb,
                            peak_alpha=0.55, extent_radii=6.0, zorder=44)
-            ax.add_patch(patches.Ellipse((sun_plot_az, sun_deg), width=2 * sun_r_x, height=2 * sun_r_y,
-                                         facecolor=sun_rgb, edgecolor="none", zorder=46))
+            draw_limb_darkened_disk(ax, sun_plot_az, sun_deg, sun_r_x, sun_r_y, sun_rgb, zorder=46)
 
         # 4. PLOT PLANETS & DYNAMIC MOON ENGINE
         bodies = {
@@ -631,7 +582,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                     if np.isnan(mag):  # outside the magnitude model's phase-angle range
                         mag = 0.0
                     eff_mag = mag + extinction.magnitude_loss(body_alt, turbidity)
-                    alpha = float(stars.visibility_alpha(eff_mag, twilight_limit))
+                    alpha = float(stars.visibility_alpha(eff_mag, limiting_magnitude_at(body_az, body_alt)))
                     if alpha <= 0.0:
                         continue
                     body_rgb = np.array(stars.PLANET_COLORS[label]) * extinction.color_tint(body_alt, turbidity)
@@ -724,8 +675,9 @@ if st.button("Generate Sky Graphic", type="primary"):
         # rather than all appearing at once, capped by the Star Visibility
         # Limit slider. Catalog limits are zenith values, so the cheap
         # magnitude pre-filter below is safe: extinction only ever dims.
-        star_limit = min(star_brightness, twilight_limit)
-        visible_stars = stars_df[stars_df['magnitude'] <= star_limit]
+        # Cheap pre-filter; the per-star limit below can only be a little
+        # above the zenith reference (spots darker than the zenith).
+        visible_stars = stars_df[stars_df['magnitude'] <= min(star_brightness, twilight_limit + 1.0)]
         if len(visible_stars):
             star_obj = Star.from_dataframe(visible_stars)
 
@@ -739,6 +691,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             # Atmospheric extinction dims stars toward the horizon (so they
             # thin out there, as in reality) and reddens what's left.
             star_eff_mag = visible_stars['magnitude'].values + extinction.magnitude_loss(star_alt, turbidity)
+            star_limit = np.minimum(star_brightness, limiting_magnitude_at(star_az, star_alt))
             star_alpha = stars.visibility_alpha(star_eff_mag, star_limit)
 
             viewport_mask = (
