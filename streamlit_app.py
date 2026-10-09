@@ -504,7 +504,10 @@ if st.button("Generate Sky Graphic", type="primary"):
         sky_display, sky_luminance, sky_zenith_dark = cached_sky(
             az_min, az_max, alt_max, sun_deg, sun_az_deg, turbidity, star_brightness, **moon_sky_kwargs
         )
-        ax.imshow(sky_display, extent=[az_min, az_max, 0, alt_max], origin="lower", aspect="auto", zorder=0)
+        # The sky is computed on a coarse grid; bilinear upscaling keeps the
+        # gradient smooth (the default would nearest-neighbor it into stripes).
+        ax.imshow(sky_display, extent=[az_min, az_max, 0, alt_max], origin="lower", aspect="auto",
+                  interpolation="bilinear", zorder=0)
 
         # Reference-overlay styling (altitude gridlines, compass lines):
         # needs to stay legible against both a bright daytime sky and a
@@ -702,6 +705,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         # magnitude pre-filter below is safe: extinction only ever dims.
         # Cheap pre-filter; the per-star limit below can only be a little
         # above the zenith reference (spots darker than the zenith).
+        drawn_hips = set()
         visible_stars = stars_df[stars_df['magnitude'] <= min(star_brightness, twilight_limit + 1.0)]
         if len(visible_stars):
             star_obj = Star.from_dataframe(visible_stars)
@@ -727,6 +731,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             plot_az = star_az[viewport_mask]
             plot_alt = star_alt[viewport_mask]
             plot_hips = visible_stars.index.values[viewport_mask]
+            drawn_hips.update(plot_hips.tolist())
             plot_rgb = (stars.bv_to_rgb(visible_stars['bv'].values[viewport_mask])
                         * extinction.color_tint(plot_alt, turbidity))
 
@@ -758,10 +763,14 @@ if st.button("Generate Sky Graphic", type="primary"):
                                 path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
         # --- CONSTELLATION STICK FIGURES ---
-        # Drawn from the end of civil twilight, as before -- independent of
-        # the star limit above, since the figures are a reference overlay.
+        # A reference overlay, independent of the star limit above. The stars
+        # that form each figure are always drawn (faintly) with it, so the lines
+        # never float without anything to point at -- even when twilight or the
+        # Star Visibility Limit would hide those stars. Lines and guide stars
+        # fade in over the first few degrees of deepening twilight.
         if show_constellations and sun_deg <= -6:
             try:
+                guide_fade = 0.3 + 0.7 * float(np.clip((-6.0 - sun_deg) / 4.0, 0.0, 1.0))
                 seg_hip_ids = sorted({hip for pair in CONSTELLATION_SEGMENTS for hip in pair})
                 seg_stars = stars_df.loc[stars_df.index.intersection(seg_hip_ids)]
                 seg_star_obj = Star.from_dataframe(seg_stars)
@@ -771,15 +780,31 @@ if st.button("Generate Sky Graphic", type="primary"):
                 seg_alt_deg = seg_alt.degrees
                 pos_by_hip = dict(zip(seg_stars.index.values, zip(seg_az_deg, seg_alt_deg)))
 
+                def seg_in_view(pos):
+                    return az_min <= pos[0] <= az_max and 0 <= pos[1] <= alt_max
+
+                anchored = set()
                 for hip_a, hip_b in CONSTELLATION_SEGMENTS:
                     pa, pb = pos_by_hip.get(hip_a), pos_by_hip.get(hip_b)
-                    if pa is None or pb is None:
+                    if pa is None or pb is None or not (seg_in_view(pa) and seg_in_view(pb)):
                         continue
-                    if not (az_min <= pa[0] <= az_max and 0 <= pa[1] <= alt_max):
-                        continue
-                    if not (az_min <= pb[0] <= az_max and 0 <= pb[1] <= alt_max):
-                        continue
-                    ax.plot([pa[0], pb[0]], [pa[1], pb[1]], color="#7dd3fc", alpha=0.35, linewidth=0.8, zorder=15)
+                    ax.plot([pa[0], pb[0]], [pa[1], pb[1]], color="#7dd3fc", alpha=0.35 * guide_fade,
+                            linewidth=0.8, zorder=15)
+                    anchored.update((hip_a, hip_b))
+
+                # Guide stars at the figure's vertices, except those the regular
+                # star pass above already drew at their true brightness.
+                guide = [h for h in sorted(anchored) if h not in drawn_hips]
+                if guide:
+                    g_stars = seg_stars.loc[guide]
+                    g_az = np.array([pos_by_hip[h][0] for h in guide])
+                    g_alt = np.array([pos_by_hip[h][1] for h in guide])
+                    # Sized as at worst a magnitude-3 star so even the faintest vertex
+                    # is a readable anchor on a broadcast-size frame.
+                    g_mag = np.minimum(g_stars['magnitude'].values + extinction.magnitude_loss(g_alt, turbidity), 3.0)
+                    g_rgb = stars.bv_to_rgb(g_stars['bv'].values) * extinction.color_tint(g_alt, turbidity)
+                    plot_point_sources(ax, g_az, g_alt, g_mag, g_rgb,
+                                       np.full(len(guide), 0.7 * guide_fade), zorder=19)
             except Exception:
                 logger.exception("Failed to draw constellation lines")
 
