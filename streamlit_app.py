@@ -87,13 +87,8 @@ def get_constellation_segments():
 
 
 @st.cache_resource
-def get_treeline_image():
-    return treeline.load_treeline_image()
-
-
-@st.cache_resource
-def get_houses_treeline_image():
-    return treeline.load_houses_treeline_image()
+def get_horizon_strips(scene):
+    return treeline.load_scene_strips(scene)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -128,8 +123,6 @@ def cached_sky(az_min, az_max, alt_max, sun_alt, sun_az, turbidity, star_visibil
 # Load the data models natively
 ts, eph, stars_df = get_astronomy_data()
 CONSTELLATION_SEGMENTS = get_constellation_segments()
-TREELINE_IMAGE = get_treeline_image()
-HOUSES_TREELINE_IMAGE = get_houses_treeline_image()
 earth = eph['earth']
 sun = eph['sun']
 
@@ -445,10 +438,11 @@ def draw_disk_glow(ax, x, y, r_x, r_y, rgb, peak_alpha, extent_radii, zorder):
 
 # The real Sun is dimmer and warmer toward its edge (limb darkening; the
 # visible-light coefficient is ~0.6, tempered here so the disk still reads
-# as brilliant). Besides being accurate, the warmer rim gives the disk a
-# defined edge against the pale glare of the sky around it.
-SUN_LIMB_DARKENING = 0.25
-SUN_LIMB_WARM_TINT = np.array([1.0, 0.78, 0.42])
+# as brilliant). The rim is kept gentle and the edge feathered: to the eye the
+# Sun is a dazzling blob that melts into its glare, not a sharp-edged sticker.
+SUN_LIMB_DARKENING = 0.22
+SUN_LIMB_WARM_TINT = np.array([1.0, 0.84, 0.56])
+SUN_EDGE_FEATHER = 0.07  # fraction of the radius over which the edge fades out
 
 
 def draw_limb_darkened_disk(ax, x, y, r_x, r_y, rgb, zorder):
@@ -461,7 +455,7 @@ def draw_limb_darkened_disk(ax, x, y, r_x, r_y, rgb, zorder):
     tint = 1.0 - toward_limb * (1.0 - SUN_LIMB_WARM_TINT)
     disk = np.zeros(U.shape + (4,))
     disk[..., :3] = np.clip(np.asarray(rgb) * intensity * tint, 0.0, 1.0)
-    disk[..., 3] = np.clip((1.0 - r) / 0.03, 0.0, 1.0)  # anti-aliased edge
+    disk[..., 3] = np.clip((1.0 - r) / SUN_EDGE_FEATHER, 0.0, 1.0)  # feathered edge
     ax.imshow(disk, extent=[x - r_x, x + r_x, y - r_y, y + r_y],
               origin="lower", aspect="auto", interpolation="bilinear", zorder=zorder)
 
@@ -546,9 +540,8 @@ if st.button("Generate Sky Graphic", type="primary"):
         # lookup succeeds), and the nearby tree/house silhouette in front of
         # it. Their union is what an observer sees -- foreground trees hide
         # low distant terrain, and mountains taller than the trees rise
-        # above them. The foreground picks a suburban houses+trees mix for
-        # lower Star Visibility Limits (urban/suburban skies) and a plain
-        # tree-line for higher ones (rural skies).
+        # above them. The foreground scene (city, suburb or countryside)
+        # follows the Star Visibility Limit.
         x_silhouette_space = np.linspace(az_min, az_max, 400)
         try:
             sample_az, horizon_deg_samples = cached_horizon_profile(lat, lon, az_min, az_max)
@@ -558,11 +551,9 @@ if st.button("Generate Sky Graphic", type="primary"):
             terrain_top = None
 
         treeline_seed = int(abs(lat * 10007 + lon * 7919 + bearing * 104729)) % (2 ** 32)
-        is_houses_variant = star_brightness <= 2.5
-        treeline_source = HOUSES_TREELINE_IMAGE if is_houses_variant else TREELINE_IMAGE
-        treeline_width_scale = treeline.HOUSES_WIDTH_SCALE if is_houses_variant else 1.0
         treeline_rgba, treeline_extent = treeline.tiled_treeline(
-            treeline_source, az_min, az_max, treeline_seed, width_scale=treeline_width_scale
+            get_horizon_strips(treeline.scene_for_visibility(star_brightness)),
+            az_min, az_max, treeline_seed,
         )
 
         _fg_az, _fg_top = treeline.silhouette_top_profile(treeline_rgba, treeline_extent)
@@ -590,7 +581,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             sun_tint = np.array([1.0, 0.98, 0.92]) * extinction.color_tint(max(sun_deg, 0.0), turbidity)
             sun_rgb = 1.0 - reddening * (1.0 - sun_tint)
             draw_disk_glow(ax, sun_plot_az, sun_deg, sun_r_x, sun_r_y, sun_rgb,
-                           peak_alpha=0.55, extent_radii=6.0, zorder=44)
+                           peak_alpha=0.45, extent_radii=8.0, zorder=44)
             draw_limb_darkened_disk(ax, sun_plot_az, sun_deg, sun_r_x, sun_r_y, sun_rgb, zorder=46)
 
         # 4. PLOT PLANETS & DYNAMIC MOON ENGINE
