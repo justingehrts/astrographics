@@ -28,6 +28,21 @@ logger = logging.getLogger(__name__)
 STANDARD_TEMPERATURE_C = 10.0
 STANDARD_PRESSURE_MBAR = 1010.0
 
+# The graphic is drawn 16:9. A degree takes the same space horizontally and
+# vertically (no stretching of trees, houses or the Moon) when the altitude
+# shown is the field-of-view width times height/width.
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 12.0, 6.75
+ALT_MAX_RANGE = (20.0, 90.0)
+ALT_MAX_STEP = 5.0
+
+
+def natural_altitude_for_fov(fov_deg):
+    """Max altitude that gives equal-angle proportions for `fov_deg`,
+    rounded to the altitude slider's step and limited to its range."""
+    ideal = fov_deg * FIG_HEIGHT_IN / FIG_WIDTH_IN
+    stepped = np.floor(ideal / ALT_MAX_STEP + 0.5) * ALT_MAX_STEP
+    return float(np.clip(stepped, *ALT_MAX_RANGE))
+
 # Set page layout to wide for a clean dashboard feel
 st.set_page_config(layout="wide", page_title="Custom Sky Graphic Generator")
 
@@ -223,13 +238,22 @@ try:
 except ValueError:
     url_bearing = 225.0
 try:
-    url_fov = np.clip(float(st.query_params.get("fov", 90.0)), 30.0, 180.0)
+    url_fov = np.clip(float(st.query_params.get("fov", 80.0)), 30.0, 180.0)
 except ValueError:
-    url_fov = 90.0
+    url_fov = 80.0
 try:
-    url_altmax = np.clip(float(st.query_params.get("altmax", 40.0)), 20.0, 90.0)
+    url_altmax = np.clip(float(st.query_params.get("altmax", 45.0)), 20.0, 90.0)
 except ValueError:
-    url_altmax = 40.0
+    url_altmax = 45.0
+
+# Lock altitude to natural proportions: on for a fresh visit. A link made
+# before this option existed carries an explicit altitude and no "lock"
+# value; keep that view exactly as it was saved.
+_url_lock = st.query_params.get("lock")
+if _url_lock is not None:
+    url_lock = _url_lock == "1"
+else:
+    url_lock = "altmax" not in st.query_params
 
 DIRECTION_PRESETS = {
     "Custom": None, "North": 0.0, "Northeast": 45.0, "East": 90.0, "Southeast": 135.0,
@@ -256,6 +280,7 @@ _seed_session_state_once("direction_preset", "Custom")
 _seed_session_state_once("bearing", url_bearing)
 _seed_session_state_once("fov_width", url_fov)
 _seed_session_state_once("alt_max", url_altmax)
+_seed_session_state_once("lock_proportions", url_lock)
 
 st.sidebar.selectbox(
     "Direction Preset", list(DIRECTION_PRESETS.keys()),
@@ -266,7 +291,17 @@ bearing = st.sidebar.slider(
     key="bearing", on_change=_clear_preset_if_bearing_diverged,
 )
 fov_width = st.sidebar.slider("Field of View Width (deg)", 30.0, 180.0, step=5.0, key="fov_width")
-alt_max = st.sidebar.slider("Max Altitude Shown (deg)", 20.0, 90.0, step=5.0, key="alt_max")
+lock_proportions = st.sidebar.checkbox(
+    "Lock altitude to natural proportions", key="lock_proportions",
+    help="Keeps the altitude shown matched to the width (at the graphic's 16:9 shape) so a "
+         "degree looks the same size sideways and upward -- trees, houses, and the Moon aren't "
+         "stretched. Untick to set the altitude yourself.",
+)
+if lock_proportions:
+    # Set before the slider below is created (Streamlit only allows that order).
+    st.session_state["alt_max"] = natural_altitude_for_fov(fov_width)
+alt_max = st.sidebar.slider("Max Altitude Shown (deg)", ALT_MAX_RANGE[0], ALT_MAX_RANGE[1],
+                            step=ALT_MAX_STEP, key="alt_max", disabled=lock_proportions)
 
 az_min = bearing - fov_width / 2.0
 az_max = bearing + fov_width / 2.0
@@ -345,6 +380,7 @@ st.query_params["tz"] = selected_tz
 st.query_params["bearing"] = f"{bearing:.0f}"
 st.query_params["fov"] = f"{fov_width:.0f}"
 st.query_params["altmax"] = f"{alt_max:.0f}"
+st.query_params["lock"] = "1" if lock_proportions else "0"
 st.query_params["turbidity"] = f"{turbidity:.1f}"
 st.query_params["brightness"] = f"{star_brightness:.1f}"
 
@@ -353,8 +389,6 @@ with st.sidebar.expander("🔗 Shareable Link"):
     _share_query = "&".join(f"{k}={v}" for k, v in st.query_params.items())
     st.code(f"?{_share_query}", language=None)
 
-
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 12.0, 6.75
 
 # Object labels sit above the horizon silhouette (zorder 100) so a body low
 # behind the tree line is still identified, with a dark outline so the text
