@@ -409,6 +409,29 @@ def draw_disk_glow(ax, x, y, r_x, r_y, rgb, peak_alpha, extent_radii, zorder):
               origin="lower", aspect="auto", interpolation="bilinear", zorder=zorder)
 
 
+# The real Sun is dimmer and warmer toward its edge (limb darkening; the
+# visible-light coefficient is ~0.6, tempered here so the disk still reads
+# as brilliant). Besides being accurate, the warmer rim gives the disk a
+# defined edge against the pale glare of the sky around it.
+SUN_LIMB_DARKENING = 0.25
+SUN_LIMB_WARM_TINT = np.array([1.0, 0.78, 0.42])
+
+
+def draw_limb_darkened_disk(ax, x, y, r_x, r_y, rgb, zorder):
+    u = np.linspace(-1.0, 1.0, 128)
+    U, V = np.meshgrid(u, u)
+    r = np.hypot(U, V)
+    mu = np.sqrt(np.clip(1.0 - r * r, 0.0, 1.0))
+    toward_limb = (1.0 - mu)[..., None]
+    intensity = 1.0 - SUN_LIMB_DARKENING * toward_limb
+    tint = 1.0 - toward_limb * (1.0 - SUN_LIMB_WARM_TINT)
+    disk = np.zeros(U.shape + (4,))
+    disk[..., :3] = np.clip(np.asarray(rgb) * intensity * tint, 0.0, 1.0)
+    disk[..., 3] = np.clip((1.0 - r) / 0.03, 0.0, 1.0)  # anti-aliased edge
+    ax.imshow(disk, extent=[x - r_x, x + r_x, y - r_y, y + r_y],
+              origin="lower", aspect="auto", interpolation="bilinear", zorder=zorder)
+
+
 # --- GRAPHIC GENERATION LOGIC ---
 if st.button("Generate Sky Graphic", type="primary"):
     with st.spinner("Computing high-fidelity directional sky model and celestial structures..."):
@@ -534,8 +557,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             sun_rgb = 1.0 - reddening * (1.0 - sun_tint)
             draw_disk_glow(ax, sun_plot_az, sun_deg, sun_r_x, sun_r_y, sun_rgb,
                            peak_alpha=0.55, extent_radii=6.0, zorder=44)
-            ax.add_patch(patches.Ellipse((sun_plot_az, sun_deg), width=2 * sun_r_x, height=2 * sun_r_y,
-                                         facecolor=sun_rgb, edgecolor="none", zorder=46))
+            draw_limb_darkened_disk(ax, sun_plot_az, sun_deg, sun_r_x, sun_r_y, sun_rgb, zorder=46)
 
         # 4. PLOT PLANETS & DYNAMIC MOON ENGINE
         bodies = {
