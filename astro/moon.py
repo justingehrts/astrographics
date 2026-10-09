@@ -24,11 +24,30 @@ Replaces two approximations in the original renderer:
 import numpy as np
 
 MOON_RADIUS_KM = 1737.4
+SUN_RADIUS_KM = 695700.0
+
+# Sun and Moon are drawn larger than life so they read on a wide broadcast
+# frame; both use the same factor so their relative sizes stay true.
+DISK_DISPLAY_SCALE = 2.5
 
 
-def angular_radius_deg(distance_km):
-    """Moon's true angular radius (semi-diameter) at the given distance."""
-    return np.degrees(np.arcsin(MOON_RADIUS_KM / distance_km))
+def angular_radius_deg(distance_km, body_radius_km=MOON_RADIUS_KM):
+    """True angular radius (semi-diameter) of a body at the given distance."""
+    return np.degrees(np.arcsin(body_radius_km / distance_km))
+
+
+def _bennett_refraction_deg(apparent_alt_deg):
+    h = np.maximum(apparent_alt_deg, -1.0)
+    return (1.0 / np.tan(np.radians(h + 7.31 / (h + 4.4)))) / 60.0
+
+
+def refraction_squash(apparent_alt_deg, true_radius_deg):
+    """Vertical/horizontal axis ratio of a disk flattened by refraction:
+    the lower limb is lifted more than the upper one, so the Sun or Moon
+    on the horizon looks ~20% squashed (Bennett's refraction formula)."""
+    lift_diff = (_bennett_refraction_deg(apparent_alt_deg - true_radius_deg)
+                 - _bennett_refraction_deg(apparent_alt_deg + true_radius_deg))
+    return float(np.clip(1.0 - lift_diff / (2.0 * true_radius_deg), 0.5, 1.0))
 
 
 def bright_limb_plot_angle_rad(sun_az_deg, sun_alt_deg, moon_az_deg, moon_alt_deg):

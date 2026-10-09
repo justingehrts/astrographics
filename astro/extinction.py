@@ -22,12 +22,36 @@ def air_mass(altitude_deg):
     return 1.0 / (np.sin(np.radians(alt)) + 0.15 * (alt + 3.885) ** -1.253)
 
 
+# Visual-band extinction for a clear site, magnitudes per air mass.
+BASE_EXTINCTION_V_MAG = 0.16
+
+
+def _haze_factor(turbidity):
+    return 1.0 + (turbidity - 1.0) * 0.25
+
+
 def rgb_transmission(altitude_deg, turbidity):
     """Per-channel atmospheric transmission factors (0-1) for light
     arriving from `altitude_deg`, scaled by the haze `turbidity` slider."""
-    ext_factor = 1.0 + (turbidity - 1.0) * 0.25
+    ext_factor = _haze_factor(turbidity)
     am = air_mass(altitude_deg)
     r = np.exp(-BASE_EXTINCTION_R * ext_factor * am)
     g = np.exp(-BASE_EXTINCTION_G * ext_factor * am)
     b = np.exp(-BASE_EXTINCTION_B * ext_factor * am)
     return r, g, b
+
+
+def color_tint(altitude_deg, turbidity):
+    """Hue-only reddening (..., 3), brightest channel = 1, for a source at
+    `altitude_deg`. Brightness loss is handled separately in magnitudes
+    (magnitude_loss) so dimming and reddening aren't applied twice."""
+    rgb = np.stack(rgb_transmission(np.asarray(altitude_deg, dtype=float), turbidity), axis=-1)
+    return rgb / np.maximum(rgb.max(axis=-1, keepdims=True), 1e-6)
+
+
+def magnitude_loss(altitude_deg, turbidity):
+    """Extra dimming in magnitudes relative to the zenith. Limiting
+    magnitudes are zenith values, so a source at 5deg (~10 air masses)
+    loses ~2 mag and stars thin out toward the horizon as they really do."""
+    k = BASE_EXTINCTION_V_MAG * _haze_factor(turbidity)
+    return k * (air_mass(altitude_deg) - 1.0)

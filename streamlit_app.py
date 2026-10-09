@@ -16,7 +16,7 @@ from skyfield.api import wgs84, Star, Loader
 from skyfield.data import hipparcos
 from skyfield.magnitudelib import planetary_magnitude
 
-from astro import constellations, extinction, horizon, location, moon, sky_model, treeline
+from astro import constellations, extinction, horizon, location, moon, sky_model, stars, treeline
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ def get_astronomy_data():
     # Forces Streamlit Cloud to download the catalog natively if missing
     with loader.open(hipparcos.URL) as f:
         stars_df = hipparcos.load_dataframe(f)
+        bv = stars.load_bv_series(f)
 
     # Many fainter Hipparcos entries have an incomplete astrometric
     # solution (blank parallax/proper-motion fields in the raw catalog,
@@ -60,6 +61,7 @@ def get_astronomy_data():
         "ra_degrees", "dec_degrees", "parallax_mas",
         "ra_mas_per_year", "dec_mas_per_year", "magnitude",
     ])
+    stars_df = stars_df.join(bv)
 
     return ts, eph, stars_df
 
@@ -334,15 +336,59 @@ with st.sidebar.expander("🔗 Shareable Link"):
     st.code(f"?{_share_query}", language=None)
 
 
-def size_for_magnitude(mag, reference_size=30.0, reference_mag=0.0, min_size=4.0, max_size=90.0):
-    """Marker size from real apparent magnitude: each magnitude step is a
-    ~2.5x brightness change, so size scales geometrically off a reference
-    point rather than linearly, keeping both faint and very bright
-    apparitions legible instead of vanishing or dominating the plot."""
-    if mag is None or np.isnan(mag):
-        return reference_size
-    delta = reference_mag - mag
-    return float(np.clip(reference_size * (1.35 ** delta), min_size, max_size))
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 12.0, 6.75
+
+# Object labels sit above the horizon silhouette (zorder 100) so a body low
+# behind the tree line is still identified, with a dark outline so the text
+# reads against bright twilight and the silhouette alike.
+LABEL_ZORDER = 110
+LABEL_OUTLINE = [patheffects.withStroke(linewidth=2.5, foreground="#000000", alpha=0.55)]
+
+
+def disk_vertical_radius(r_x_deg, fov_width, alt_max):
+    """Altitude-axis radius that makes a disk with azimuth-axis radius
+    `r_x_deg` look round on screen, given that the x and y axes have
+    different degrees-per-inch (fov_width over the figure width vs.
+    alt_max over its height)."""
+    return r_x_deg * (FIG_WIDTH_IN / fov_width) / (FIG_HEIGHT_IN / alt_max)
+
+
+def plot_point_sources(ax, az, alt, eff_mag, rgb, alpha, zorder):
+    """Stars/planets: marker size from (extinction-adjusted) magnitude,
+    per-point color and opacity, plus a soft two-layer glow on anything
+    brighter than about magnitude 1 so the brightest objects read as
+    brilliant rather than just larger dots."""
+    az, alt, eff_mag, alpha = (np.atleast_1d(np.asarray(v, dtype=float)) for v in (az, alt, eff_mag, alpha))
+    rgb = np.atleast_2d(np.asarray(rgb, dtype=float))
+    sizes = stars.marker_size(eff_mag)
+
+    glow_strength = alpha * np.clip((1.0 - eff_mag) / 4.0, 0.0, 1.0)
+    has_glow = glow_strength > 0
+    if has_glow.any():
+        # Many faint, widening layers so the glow's edge isn't visible as a ring.
+        for size_mult, glow_alpha in ((2.0, 0.10), (3.5, 0.07), (5.5, 0.05), (8.0, 0.035), (11.0, 0.025)):
+            ax.scatter(
+                az[has_glow], alt[has_glow], s=sizes[has_glow] * size_mult,
+                c=np.column_stack([rgb[has_glow], glow_alpha * glow_strength[has_glow]]),
+                linewidths=0, zorder=zorder - 1,
+            )
+    ax.scatter(az, alt, s=sizes, c=np.column_stack([rgb, alpha]), linewidths=0, zorder=zorder)
+
+
+def draw_disk_glow(ax, x, y, r_x, r_y, rgb, peak_alpha, extent_radii, zorder):
+    """Soft glow around the Sun/Moon: a smooth Gaussian falloff from the
+    disk's edge out to `extent_radii` disk radii, drawn as one RGBA image
+    (stacked flat ellipses show visible rings)."""
+    u = np.linspace(-extent_radii, extent_radii, 96)
+    U, V = np.meshgrid(u, u)
+    beyond_edge = np.maximum(np.hypot(U, V) - 1.0, 0.0)
+    sigma = (extent_radii - 1.0) / 2.5
+    glow = np.zeros(U.shape + (4,))
+    glow[..., :3] = rgb
+    glow[..., 3] = peak_alpha * np.exp(-(beyond_edge / sigma) ** 2)
+    ax.imshow(glow, extent=[x - extent_radii * r_x, x + extent_radii * r_x,
+                            y - extent_radii * r_y, y + extent_radii * r_y],
+              origin="lower", aspect="auto", interpolation="bilinear", zorder=zorder)
 
 
 # --- GRAPHIC GENERATION LOGIC ---
@@ -356,11 +402,11 @@ if st.button("Generate Sky Graphic", type="primary"):
 
         sun_astrometric = observer_loc.at(t).observe(sun)
         sun_apparent = sun_astrometric.apparent()
-        sun_alt, sun_az, _ = sun_apparent.altaz(temperature_C=STANDARD_TEMPERATURE_C, pressure_mbar=STANDARD_PRESSURE_MBAR)
+        sun_alt, sun_az, sun_distance = sun_apparent.altaz(temperature_C=STANDARD_TEMPERATURE_C, pressure_mbar=STANDARD_PRESSURE_MBAR)
         sun_deg = sun_alt.degrees
         sun_az_deg = sun_az.degrees
 
-        fig, ax = plt.subplots(figsize=(12, 6.75), dpi=100, facecolor='none')
+        fig, ax = plt.subplots(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=100, facecolor='none')
         ax.set_position([0, 0, 1, 1])  # full-bleed: no default subplot margins around the sky
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, alt_max)
@@ -422,20 +468,28 @@ if st.button("Generate Sky Graphic", type="primary"):
 
         night_sky_matrix = color_space_navy[None, None, :] * v_frac[..., None] + color_night_base[None, None, :] * (1.0 - v_frac[..., None])
 
+        # Earth's shadow + Belt of Venus, opposite the sun around sunset/
+        # sunrise: a dark blue-grey band rising from the anti-solar horizon
+        # to about the sun's depression angle, with a pink band of
+        # backscattered, reddened sunlight just above it.
         az_diff_rad = np.radians(X_mesh - sun_az_deg)
         h_shadow = np.degrees(np.arcsin(np.clip(np.sin(np.radians(sun_deg)) * np.cos(az_diff_rad), -1.0, 1.0)))
+        shadow_top_deg = np.maximum(h_shadow, 0.0)
+        # Falls to zero, with zero slope, 90deg either side of the
+        # anti-solar azimuth -- a hard cutoff there shows as a vertical seam.
+        antisolar_weight = np.clip(-np.cos(az_diff_rad), 0.0, 1.0) ** 1.5
+        # Appears at sunset, strongest from about -2 to -4, gone by -7.
+        belt_activity = np.clip((1.0 - sun_deg) / 3.0, 0, 1) * np.clip((sun_deg + 7.0) / 4.0, 0, 1)
+        belt_weight = antisolar_weight * belt_activity
 
-        belt_of_venus_mask = np.exp(-((Y_mesh - (h_shadow + 3.0)) / 3.0)**2) * np.clip((sun_deg + 5.0) / 5.0, 0, 1)
-        # h_shadow depends only on azimuth (constant down each column), so
-        # a hard "h_shadow < 0" cutoff produces a sharp vertical seam
-        # wherever that boundary (90deg from the sun's azimuth) falls
-        # inside the current view. Fade smoothly across it instead.
-        antisolar_fade = 1.0 / (1.0 + np.exp(h_shadow / 8.0))
-        belt_of_venus_mask = belt_of_venus_mask * antisolar_fade
+        earth_shadow_mask = belt_weight / (1.0 + np.exp((Y_mesh - shadow_top_deg) / 0.8))
+        # The belt sits roughly 5-20deg up, above the shadow's top edge.
+        belt_of_venus_mask = belt_weight * np.exp(-((Y_mesh - (shadow_top_deg + 8.0)) / 5.0) ** 2)
 
-        twilight_sky_matrix[..., 0] += belt_of_venus_mask * 0.16
-        twilight_sky_matrix[..., 1] += belt_of_venus_mask * 0.05
-        twilight_sky_matrix[..., 2] += belt_of_venus_mask * 0.08
+        twilight_sky_matrix *= (1.0 - 0.35 * earth_shadow_mask)[..., None]
+        twilight_sky_matrix[..., 0] += belt_of_venus_mask * 0.22
+        twilight_sky_matrix[..., 1] += belt_of_venus_mask * 0.09
+        twilight_sky_matrix[..., 2] += belt_of_venus_mask * 0.12
 
         # Perceptual lift for the hand-authored twilight/night gradients
         # (the day sky is already tone-mapped inside sky_model.daytime_sky_rgb).
@@ -494,6 +548,66 @@ if st.button("Generate Sky Graphic", type="primary"):
                 aspect="auto", zorder=1, interpolation="bilinear"
             )
 
+        # How faint an object the sky brightness allows, from daylight
+        # through twilight to full dark (the Star Visibility Limit slider
+        # caps this further for stars only -- it represents light pollution
+        # and declutter, which shouldn't hide planets).
+        twilight_limit = stars.twilight_limiting_magnitude(sun_deg)
+
+        # Horizon geometry, computed up front (drawn in section 6) so labels
+        # can skip objects hidden behind it. Two layers, both rising from
+        # the baseline: distant terrain from real elevation data (when the
+        # lookup succeeds), and the nearby tree/house silhouette in front of
+        # it. Their union is what an observer sees -- foreground trees hide
+        # low distant terrain, and mountains taller than the trees rise
+        # above them. The foreground picks a suburban houses+trees mix for
+        # lower Star Visibility Limits (urban/suburban skies) and a plain
+        # tree-line for higher ones (rural skies).
+        x_silhouette_space = np.linspace(az_min, az_max, 400)
+        try:
+            sample_az, horizon_deg_samples = cached_horizon_profile(lat, lon, az_min, az_max)
+            terrain_top = np.clip(np.interp(x_silhouette_space, sample_az, horizon_deg_samples), 0.3, alt_max)
+        except Exception:
+            logger.exception("Terrain horizon lookup failed; drawing the foreground silhouette only")
+            terrain_top = None
+
+        treeline_seed = int(abs(lat * 10007 + lon * 7919 + bearing * 104729)) % (2 ** 32)
+        is_houses_variant = star_brightness <= 2.5
+        treeline_source = HOUSES_TREELINE_IMAGE if is_houses_variant else TREELINE_IMAGE
+        treeline_width_scale = treeline.HOUSES_WIDTH_SCALE if is_houses_variant else 1.0
+        treeline_rgba, treeline_extent = treeline.tiled_treeline(
+            treeline_source, az_min, az_max, treeline_seed, width_scale=treeline_width_scale
+        )
+
+        _fg_az, _fg_top = treeline.silhouette_top_profile(treeline_rgba, treeline_extent)
+        horizon_top_profile = np.interp(x_silhouette_space, _fg_az, _fg_top)
+        if terrain_top is not None:
+            horizon_top_profile = np.maximum(horizon_top_profile, terrain_top)
+
+        def horizon_top_at(az):
+            """Altitude the horizon silhouette reaches at azimuth `az`."""
+            return np.interp(az, x_silhouette_space, horizon_top_profile)
+
+        # --- SUN DISK ---
+        # Same exaggeration as the Moon so their relative size stays true;
+        # reddened and refraction-flattened near the horizon, and clipped
+        # by the horizon silhouette (zorder 100) as it sets.
+        sun_true_radius = moon.angular_radius_deg(sun_distance.km, moon.SUN_RADIUS_KM)
+        sun_r_x = sun_true_radius * moon.DISK_DISPLAY_SCALE
+        sun_r_y = disk_vertical_radius(sun_r_x, fov_width, alt_max) * moon.refraction_squash(sun_deg, sun_true_radius)
+        sun_plot_az = float(normalize_az(sun_az_deg, az_min, az_max))
+        if az_min <= sun_plot_az <= az_max and -sun_r_y <= sun_deg <= alt_max + sun_r_y:
+            # The Sun's light is physically reddened at any altitude, but it's
+            # dazzling (reads as white) until it's low and dim enough to look
+            # at, so ease from warm white up high to the full tint at the horizon.
+            reddening = np.clip(1.0 - sun_deg / 15.0, 0.25, 1.0)
+            sun_tint = np.array([1.0, 0.98, 0.92]) * extinction.color_tint(max(sun_deg, 0.0), turbidity)
+            sun_rgb = 1.0 - reddening * (1.0 - sun_tint)
+            draw_disk_glow(ax, sun_plot_az, sun_deg, sun_r_x, sun_r_y, sun_rgb,
+                           peak_alpha=0.55, extent_radii=6.0, zorder=44)
+            ax.add_patch(patches.Ellipse((sun_plot_az, sun_deg), width=2 * sun_r_x, height=2 * sun_r_y,
+                                         facecolor=sun_rgb, edgecolor="none", zorder=46))
+
         # 4. PLOT PLANETS & DYNAMIC MOON ENGINE
         bodies = {
             'mercury': (eph['mercury'], 'Mercury'),
@@ -513,12 +627,19 @@ if st.button("Generate Sky Graphic", type="primary"):
                 body_az = normalize_az(body_az, az_min, az_max)
 
                 if az_min <= body_az <= az_max and 0 <= body_alt <= alt_max:
-                    mag = planetary_magnitude(astrometric)
-                    size = size_for_magnitude(mag)
-                    body_color = extinction.rgb_transmission(body_alt, turbidity)
-                    ax.scatter(body_az, body_alt, s=size, color=body_color, zorder=50)
-                    if show_labels:
-                        ax.text(body_az + 0.5, body_alt + 0.5, label, color="#ffffff", fontsize=10, weight='bold', zorder=51)
+                    mag = float(planetary_magnitude(astrometric))
+                    if np.isnan(mag):  # outside the magnitude model's phase-angle range
+                        mag = 0.0
+                    eff_mag = mag + extinction.magnitude_loss(body_alt, turbidity)
+                    alpha = float(stars.visibility_alpha(eff_mag, twilight_limit))
+                    if alpha <= 0.0:
+                        continue
+                    body_rgb = np.array(stars.PLANET_COLORS[label]) * extinction.color_tint(body_alt, turbidity)
+                    # Below the Moon (zorder 49-50) so a lunar occultation hides the planet.
+                    plot_point_sources(ax, body_az, body_alt, eff_mag, body_rgb, alpha, zorder=48)
+                    if show_labels and body_alt > horizon_top_at(body_az):
+                        ax.text(body_az + 0.5, body_alt + 0.5, label, color="#ffffff", fontsize=10, weight='bold',
+                                path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
             except Exception:
                 logger.exception("Failed to compute/plot position for %s", label)
                 continue
@@ -534,24 +655,29 @@ if st.button("Generate Sky Graphic", type="primary"):
 
             moon_az = normalize_az(moon_az, az_min, az_max)
 
-            if az_min <= moon_az <= az_max and 0 <= moon_alt <= alt_max:
+            moon_true_radius = moon.angular_radius_deg(m_distance.km)
+            r_x = moon_true_radius * moon.DISK_DISPLAY_SCALE  # visually exaggerated for broadcast legibility
+            r_y = disk_vertical_radius(r_x, fov_width, alt_max) * moon.refraction_squash(moon_alt, moon_true_radius)
+
+            if az_min <= moon_az <= az_max and -r_y <= moon_alt <= alt_max:
                 m_pos = observer_loc.at(t).observe(moon_body).position.au
                 s_pos = observer_loc.at(t).observe(sun).position.au
 
                 m_dot_s = np.dot(m_pos, s_pos) / (np.linalg.norm(m_pos) * np.linalg.norm(s_pos))
                 elongation = np.arccos(np.clip(m_dot_s, -1.0, 1.0))
-                illuminated_fraction = 0.5 * (1.0 + np.cos(elongation))
+                # Phase angle ~= 180deg - elongation for the Moon, so the lit
+                # fraction is (1 - cos(elongation)) / 2: 0 at new, 1 at full.
+                illuminated_fraction = 0.5 * (1.0 - np.cos(elongation))
 
                 pabl_rad = moon.bright_limb_plot_angle_rad(sun_az_deg, sun_deg, moon_az, moon_alt)
-
-                r_x = moon.angular_radius_deg(m_distance.km) * 2.5  # visually exaggerated for broadcast legibility
-                r_y = r_x * (12.0 / 90.0) / (6.75 / alt_max)
 
                 phi = np.linspace(-np.pi/2, np.pi/2, 30)
 
                 x_outer_unit, y_outer_unit = np.cos(phi), np.sin(phi)
 
-                phase_modifier = (illuminated_fraction - 0.5) * 2.0
+                # Terminator half-width as a fraction of the radius: +1 puts it
+                # on the lit limb (new Moon, nothing lit), -1 on the far limb (full).
+                phase_modifier = (0.5 - illuminated_fraction) * 2.0
                 x_inner_unit, y_inner_unit = x_outer_unit * phase_modifier, y_outer_unit
 
                 cos_p, sin_p = np.cos(pabl_rad), np.sin(pabl_rad)
@@ -572,116 +698,117 @@ if st.button("Generate Sky Graphic", type="primary"):
                 codes = [Path.MOVETO] + [Path.LINETO] * (len(verts) - 2) + [Path.CLOSEPOLY]
                 moon_path = Path(verts, codes)
 
-                moon_patch = patches.PathPatch(moon_path, facecolor='#ffffff', edgecolor='none', zorder=50)
+                # Rising/setting Moon reddens toward orange like the Sun does.
+                moon_rgb = np.array([0.97, 0.96, 0.92]) * extinction.color_tint(max(moon_alt, 0.0), turbidity)
+
+                # Soft halo from atmospheric scattering, brighter the fuller the Moon.
+                draw_disk_glow(ax, moon_az, moon_alt, r_x, r_y, moon_rgb,
+                               peak_alpha=0.30 * illuminated_fraction, extent_radii=4.0, zorder=47)
+
+                moon_patch = patches.PathPatch(moon_path, facecolor=moon_rgb, edgecolor='none', zorder=50)
                 ax.add_patch(moon_patch)
 
                 if illuminated_fraction < 0.90:
-                    dark_disk = patches.Ellipse((moon_az, moon_alt), width=r_x*2, height=r_y*2, facecolor='#ffffff', alpha=0.08, edgecolor='none', zorder=49)
+                    dark_disk = patches.Ellipse((moon_az, moon_alt), width=r_x*2, height=r_y*2, facecolor=moon_rgb, alpha=0.08, edgecolor='none', zorder=49)
                     ax.add_patch(dark_disk)
 
-                if show_labels:
-                    ax.text(moon_az + r_x + 0.4, moon_alt + 0.6, "Moon", color="#ffffff", fontsize=11, weight='bold', zorder=51)
+                # Labeled once at least its upper half clears the horizon silhouette.
+                if show_labels and moon_alt > horizon_top_at(moon_az):
+                    ax.text(moon_az + r_x + 0.4, moon_alt + 0.6, "Moon", color="#ffffff", fontsize=11, weight='bold',
+                            path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
         except Exception:
             logger.exception("Failed to compute/plot Moon position")
 
         # 5. DYNAMIC HIPPARCOS STAR FIELD
-        if sun_deg <= -6:
-            # Filter catalog natively via user slider
-            visible_stars = stars_df[stars_df['magnitude'] <= star_brightness]
+        # Stars fade in progressively through twilight (brightest first)
+        # rather than all appearing at once, capped by the Star Visibility
+        # Limit slider. Catalog limits are zenith values, so the cheap
+        # magnitude pre-filter below is safe: extinction only ever dims.
+        star_limit = min(star_brightness, twilight_limit)
+        visible_stars = stars_df[stars_df['magnitude'] <= star_limit]
+        if len(visible_stars):
             star_obj = Star.from_dataframe(visible_stars)
 
             # Vectorized altitude/azimuth calculations for the entire visible catalog
             star_astrometric = observer_loc.at(t).observe(star_obj)
             s_alt, s_az, _ = star_astrometric.apparent().altaz(temperature_C=STANDARD_TEMPERATURE_C, pressure_mbar=STANDARD_PRESSURE_MBAR)
 
-            star_az = s_az.degrees
+            star_az = normalize_az(s_az.degrees, az_min, az_max)
             star_alt = s_alt.degrees
 
-            star_az = normalize_az(star_az, az_min, az_max)
+            # Atmospheric extinction dims stars toward the horizon (so they
+            # thin out there, as in reality) and reddens what's left.
+            star_eff_mag = visible_stars['magnitude'].values + extinction.magnitude_loss(star_alt, turbidity)
+            star_alpha = stars.visibility_alpha(star_eff_mag, star_limit)
 
-            # Cull stars strictly to viewport margins
-            viewport_mask = (star_az >= az_min) & (star_az <= az_max) & (star_alt >= 0) & (star_alt <= alt_max)
+            viewport_mask = (
+                (star_az >= az_min) & (star_az <= az_max) & (star_alt >= 0) & (star_alt <= alt_max)
+                & (star_alpha > 0)
+            )
 
             plot_az = star_az[viewport_mask]
             plot_alt = star_alt[viewport_mask]
-            plot_mag = visible_stars['magnitude'].values[viewport_mask]
             plot_hips = visible_stars.index.values[viewport_mask]
+            plot_rgb = (stars.bv_to_rgb(visible_stars['bv'].values[viewport_mask])
+                        * extinction.color_tint(plot_alt, turbidity))
 
-            sizes = np.maximum(0.5, (5.0 - plot_mag) * 2.5)
-
-            # Dim/redden stars near the horizon with the same atmospheric
-            # extinction physics used for the sunset glow above.
-            ext_r, ext_g, ext_b = extinction.rgb_transmission(plot_alt, turbidity)
-            star_colors = np.stack([ext_r, ext_g, ext_b], axis=-1)
-
-            # Plot the entire valid array simultaneously
-            ax.scatter(plot_az, plot_alt, s=sizes, c=star_colors, alpha=0.7, zorder=20)
+            plot_point_sources(ax, plot_az, plot_alt, star_eff_mag[viewport_mask], plot_rgb,
+                               star_alpha[viewport_mask], zorder=20)
 
             # Dictionary of major anchor stars (Hipparcos ID -> Common Name)
             major_stars = {
                 32349: "Sirius", 24608: "Capella", 69673: "Arcturus", 91262: "Vega",
-                25336: "Rigel", 37279: "Procyon", 27989: "Betelgeuse", 97649: "Altair",
-                21421: "Aldebaran", 65474: "Spica", 80112: "Antares", 37826: "Pollux",
+                24436: "Rigel", 37279: "Procyon", 27989: "Betelgeuse", 97649: "Altair",
+                21421: "Aldebaran", 65474: "Spica", 80763: "Antares", 37826: "Pollux",
                 102098: "Deneb", 49669: "Regulus", 36850: "Castor", 11767: "Polaris"
             }
 
+            # Only label stars that aren't hidden behind the horizon silhouette.
+            unobstructed = plot_alt > horizon_top_at(plot_az)
+            label_az, label_alt, label_hips = plot_az[unobstructed], plot_alt[unobstructed], plot_hips[unobstructed]
+
             if show_major_star_labels:
-                for az_val, alt_val, hip_id in zip(plot_az, plot_alt, plot_hips):
+                for az_val, alt_val, hip_id in zip(label_az, label_alt, label_hips):
                     if hip_id in major_stars:
-                        ax.text(az_val + 0.4, alt_val + 0.4, major_stars[hip_id], color="#ffffff", fontsize=9, alpha=0.5, zorder=21)
+                        ax.text(az_val + 0.4, alt_val + 0.4, major_stars[hip_id], color="#ffffff", fontsize=9, alpha=0.5,
+                                path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
             if show_minor_star_labels:
-                for az_val, alt_val, hip_id in zip(plot_az, plot_alt, plot_hips):
+                for az_val, alt_val, hip_id in zip(label_az, label_alt, label_hips):
                     if hip_id not in major_stars:
-                        ax.text(az_val + 0.4, alt_val + 0.4, f"HIP {hip_id}", color="#ffffff", fontsize=7, alpha=0.35, zorder=21)
+                        ax.text(az_val + 0.4, alt_val + 0.4, f"HIP {hip_id}", color="#ffffff", fontsize=7, alpha=0.35,
+                                path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
-            # --- CONSTELLATION STICK FIGURES ---
-            if show_constellations:
-                try:
-                    seg_hip_ids = sorted({hip for pair in CONSTELLATION_SEGMENTS for hip in pair})
-                    seg_stars = stars_df.loc[stars_df.index.intersection(seg_hip_ids)]
-                    seg_star_obj = Star.from_dataframe(seg_stars)
-                    seg_astrometric = observer_loc.at(t).observe(seg_star_obj)
-                    seg_alt, seg_az, _ = seg_astrometric.apparent().altaz(temperature_C=STANDARD_TEMPERATURE_C, pressure_mbar=STANDARD_PRESSURE_MBAR)
-                    seg_az_deg = normalize_az(seg_az.degrees, az_min, az_max)
-                    seg_alt_deg = seg_alt.degrees
-                    pos_by_hip = dict(zip(seg_stars.index.values, zip(seg_az_deg, seg_alt_deg)))
+        # --- CONSTELLATION STICK FIGURES ---
+        # Drawn from the end of civil twilight, as before -- independent of
+        # the star limit above, since the figures are a reference overlay.
+        if show_constellations and sun_deg <= -6:
+            try:
+                seg_hip_ids = sorted({hip for pair in CONSTELLATION_SEGMENTS for hip in pair})
+                seg_stars = stars_df.loc[stars_df.index.intersection(seg_hip_ids)]
+                seg_star_obj = Star.from_dataframe(seg_stars)
+                seg_astrometric = observer_loc.at(t).observe(seg_star_obj)
+                seg_alt, seg_az, _ = seg_astrometric.apparent().altaz(temperature_C=STANDARD_TEMPERATURE_C, pressure_mbar=STANDARD_PRESSURE_MBAR)
+                seg_az_deg = normalize_az(seg_az.degrees, az_min, az_max)
+                seg_alt_deg = seg_alt.degrees
+                pos_by_hip = dict(zip(seg_stars.index.values, zip(seg_az_deg, seg_alt_deg)))
 
-                    for hip_a, hip_b in CONSTELLATION_SEGMENTS:
-                        pa, pb = pos_by_hip.get(hip_a), pos_by_hip.get(hip_b)
-                        if pa is None or pb is None:
-                            continue
-                        if not (az_min <= pa[0] <= az_max and 0 <= pa[1] <= alt_max):
-                            continue
-                        if not (az_min <= pb[0] <= az_max and 0 <= pb[1] <= alt_max):
-                            continue
-                        ax.plot([pa[0], pb[0]], [pa[1], pb[1]], color="#7dd3fc", alpha=0.35, linewidth=0.8, zorder=15)
-                except Exception:
-                    logger.exception("Failed to draw constellation lines")
+                for hip_a, hip_b in CONSTELLATION_SEGMENTS:
+                    pa, pb = pos_by_hip.get(hip_a), pos_by_hip.get(hip_b)
+                    if pa is None or pb is None:
+                        continue
+                    if not (az_min <= pa[0] <= az_max and 0 <= pa[1] <= alt_max):
+                        continue
+                    if not (az_min <= pb[0] <= az_max and 0 <= pb[1] <= alt_max):
+                        continue
+                    ax.plot([pa[0], pb[0]], [pa[1], pb[1]], color="#7dd3fc", alpha=0.35, linewidth=0.8, zorder=15)
+            except Exception:
+                logger.exception("Failed to draw constellation lines")
 
-        # 6. HORIZON SILHOUETTE
-        # Real terrain-derived horizon when the elevation lookup succeeds;
-        # falls back to a tiled silhouette image (astro/treeline.py) if
-        # the API is slow or unavailable, which is location-independent
-        # either way. The fallback picks between a suburban houses+trees
-        # mix (lower Star Visibility Limit -- urban/suburban skies, where
-        # houses would realistically be part of the horizon) and a plain
-        # tree-line (higher Star Visibility Limit -- rural skies).
-        x_silhouette_space = np.linspace(az_min, az_max, 400)
-        try:
-            sample_az, horizon_deg_samples = cached_horizon_profile(lat, lon, az_min, az_max)
-            y_silhouette = np.clip(np.interp(x_silhouette_space, sample_az, horizon_deg_samples), 0.3, alt_max)
-            ax.fill_between(x_silhouette_space, -5, y_silhouette, color="#060c14", zorder=100)
-        except Exception:
-            logger.exception("Terrain horizon lookup failed; falling back to tree-line image")
-            treeline_seed = int(abs(lat * 10007 + lon * 7919 + bearing * 104729)) % (2 ** 32)
-            is_houses_variant = star_brightness <= 2.5
-            treeline_source = HOUSES_TREELINE_IMAGE if is_houses_variant else TREELINE_IMAGE
-            treeline_width_scale = treeline.HOUSES_WIDTH_SCALE if is_houses_variant else 1.0
-            treeline_rgba, treeline_extent = treeline.tiled_treeline(
-                treeline_source, az_min, az_max, treeline_seed, width_scale=treeline_width_scale
-            )
-            ax.imshow(treeline_rgba, extent=treeline_extent, aspect="auto", zorder=100)
+        # 6. HORIZON SILHOUETTE (geometry computed before section 4)
+        if terrain_top is not None:
+            ax.fill_between(x_silhouette_space, -5, terrain_top, color="#060c14", zorder=100)
+        ax.imshow(treeline_rgba, extent=treeline_extent, aspect="auto", zorder=100)
 
         # Reference overlays are opt-in and drawn manually (axhline/axvline
         # + text), matching how every other label in this chart is drawn --
