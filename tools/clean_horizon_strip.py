@@ -21,7 +21,8 @@ tree crowns that have no trunk. This tool, per strip:
      PNG that is the silhouette's alpha.
 
 usage: clean_horizon_strip.py SCENE OUT_DIR SRC [SRC ...]
-(SCENE is urban, suburban or rural; sources are untrusted input, decoded as
+(SCENE is urban, suburban, rural, or suburban-bare / rural-bare for winter art
+with bare deciduous trees (written as bare_NN.png); sources are untrusted input, decoded as
 pixels only.)
 """
 import os
@@ -49,7 +50,14 @@ STRONG = dict(crack=2.2, hole_frac=0.0055, boxy_max=0.045, speck=40, open=1.0)
 # milder version above the fence band and GENTLE inside it.
 RURAL = dict(crack=1.8, hole_frac=0.0008, boxy_max=0.012, speck=12, open=0.4)
 GENTLE = dict(crack=1.2, hole_frac=0.0008, boxy_max=0.0, speck=12, open=0.4)
-PRESETS = {"urban": STRONG, "suburban": STRONG, "rural": RURAL}
+# Winter strips (bare deciduous trees) keep their fine branching: RURAL-like
+# settings, GENTLE in the fence band, and no trunk re-attachment -- the
+# "floating" bits in a bare crown are twig tips, and extruding a trunk down from
+# each would draw stray vertical sticks through the branches.
+BARE = dict(RURAL, attach=False)
+BARE_GENTLE = dict(GENTLE, attach=False)
+PRESETS = {"urban": STRONG, "suburban": STRONG, "rural": RURAL,
+           "suburban-bare": BARE, "rural-bare": BARE}
 
 
 def disk(r):
@@ -125,15 +133,25 @@ def clean_mask(gray, p):
     sizes = ndi.sum(m, lab2, index=np.arange(1, n2 + 1))
     keep = np.zeros(n2 + 1, bool)
     keep[1:] = sizes >= p["speck"] * SS * SS
-    m, attached = attach_floating(keep[lab2])
+    m, attached = attach_floating(keep[lab2]) if p.get("attach", True) else (keep[lab2], 0)
     return m[pad:-pad, pad:-pad], attached
+
+
+def crop_to_ink_rows(gray):
+    """Winter sources come on a tall canvas with the strip in the middle band;
+    the strip's own height is what equals 10 deg, so crop to the ink."""
+    ink_rows = np.where((gray < THRESHOLD).any(axis=1))[0]
+    return gray[ink_rows.min():ink_rows.max() + 1]
 
 
 def clean_strip(src, scene):
     gray = np.array(Image.open(src).convert("L"))
+    bare = scene.endswith("-bare")
+    if bare:
+        gray = crop_to_ink_rows(gray)
     m, attached = clean_mask(gray, PRESETS[scene])
-    if scene == "rural":
-        fine, _ = clean_mask(gray, GENTLE)
+    if scene == "rural" or bare:
+        fine, _ = clean_mask(gray, BARE_GENTLE if bare else GENTLE)
         band = int(FENCE_BAND * m.shape[0])
         m[-band:] = fine[-band:]
     return m, attached
@@ -189,7 +207,8 @@ def main(scene, out_dir, sources):
             continue
         written += 1
         a = to_alpha(m)
-        out = os.path.join(out_dir, f"{scene}_{written:02d}.png")
+        prefix = "bare" if scene.endswith("-bare") else scene
+        out = os.path.join(out_dir, f"{prefix}_{written:02d}.png")
         Image.fromarray(a, "L").save(out, optimize=True)
         print(f"{name} -> {out} {a.shape[1]}x{a.shape[0]}  attached={attached}  "
               f"clear-end level: left={llev} right={rlev}")

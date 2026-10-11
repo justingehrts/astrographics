@@ -87,8 +87,8 @@ def get_constellation_segments():
 
 
 @st.cache_resource
-def get_horizon_strips(scene):
-    return treeline.load_scene_strips(scene)
+def get_horizon_strips(scene, leaves):
+    return treeline.load_scene_strips(scene, leaves=leaves)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -354,6 +354,22 @@ sky_conditions = {
 
 st.sidebar.caption(f"**Current Viewport Simulation:** \n{sky_conditions[star_brightness]}")
 
+# Tree foliage for the horizon scene. Auto follows the observation date (leaves
+# April-October, bare the rest of the year, flipped in the Southern Hemisphere);
+# the other two override it. A shared link carries the choice, not the season.
+FOLIAGE_OPTIONS = {"auto": "Auto (by date)", "on": "Leaves", "off": "Bare (winter)"}
+_url_leaves = st.query_params.get("leaves", "auto")
+_seed_session_state_once("foliage", _url_leaves if _url_leaves in FOLIAGE_OPTIONS else "auto")
+foliage = st.sidebar.selectbox(
+    "Tree Foliage", list(FOLIAGE_OPTIONS), format_func=FOLIAGE_OPTIONS.get, key="foliage",
+    help="Whether deciduous trees on the horizon have leaves. Auto uses the date selected above: "
+         "leaves April-October, bare November-March (reversed south of the equator).",
+)
+season_has_leaves = treeline.foliage_season_default(obs_date, lat)
+horizon_has_leaves = season_has_leaves if foliage == "auto" else foliage == "on"
+if foliage == "auto":
+    st.sidebar.caption(f"Auto: {'leaves' if season_has_leaves else 'bare trees'} for this date and latitude.")
+
 # --- SIDEBAR: 4. LABELS & OVERLAYS ---
 st.sidebar.header("4. Labels & Overlays")
 
@@ -376,6 +392,7 @@ st.query_params["altmax"] = f"{alt_max:.0f}"
 st.query_params["lock"] = "1" if lock_proportions else "0"
 st.query_params["turbidity"] = f"{turbidity:.1f}"
 st.query_params["brightness"] = f"{star_brightness:.1f}"
+st.query_params["leaves"] = foliage
 
 with st.sidebar.expander("🔗 Shareable Link"):
     st.caption("This exact view (location, time, direction, and sky settings) is captured below. Append it to this app's base URL to share or bookmark it -- or just copy the address bar, which already reflects it.")
@@ -554,9 +571,13 @@ if st.button("Generate Sky Graphic", type="primary"):
             terrain_top = None
 
         treeline_seed = int(abs(lat * 10007 + lon * 7919 + bearing * 104729)) % (2 ** 32)
+        horizon_scene = treeline.scene_for_visibility(star_brightness)
+        horizon_strips, horizon_is_bare = get_horizon_strips(horizon_scene, horizon_has_leaves)
+        if not horizon_has_leaves and not horizon_is_bare and horizon_scene != "urban":
+            st.info(f"Winter (bare-tree) art isn't available for the {horizon_scene} scene yet; "
+                    "showing it with leaves.")
         treeline_rgba, treeline_extent = treeline.tiled_treeline(
-            get_horizon_strips(treeline.scene_for_visibility(star_brightness)),
-            az_min, az_max, treeline_seed,
+            horizon_strips, az_min, az_max, treeline_seed,
         )
 
         _fg_az, _fg_top = treeline.silhouette_top_profile(treeline_rgba, treeline_extent)

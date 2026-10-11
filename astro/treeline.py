@@ -13,6 +13,12 @@ trunk, and both ends trimmed to a low fence/lawn stretch. Every strip is
 stored at the same scale (OUT_H px == TREE_HEIGHT_DEG), so a house or tree has
 the same angular size wherever it is placed.
 
+Each scene has a summer set (leaves on the trees) in data/horizon/<scene>/ and
+a winter set (bare deciduous trees, evergreens kept) in data/horizon/<scene>/bare/.
+A scene with no winter set falls back to its summer one -- the urban skyline is
+buildings, so it has no winter set by design. `foliage_season_default` picks
+which set a date calls for.
+
 Because the ends are low, strips are chained in a seeded random order with no
 mirroring (a mirrored house would read as obviously reused); each view starts
 at a random horizontal offset so different locations and directions don't all
@@ -55,14 +61,35 @@ def scene_for_visibility(star_brightness):
     return "rural"
 
 
-def load_scene_strips(scene):
-    """Loads a scene's cleaned strips as a list of uint8 alpha arrays
-    (height x width). Callers should cache this (e.g. via st.cache_resource)
-    -- it's static data, loaded from disk once."""
+# Leaves are on from April through October (Northern Hemisphere); the Southern
+# Hemisphere is six months out of phase, and the tropics have no leaf-fall season.
+LEAF_MONTHS = range(4, 11)
+TROPICS_LATITUDE = 23.5
+
+
+def foliage_season_default(date, lat):
+    """True when deciduous trees would be in leaf on `date` at latitude `lat`."""
+    if abs(lat) < TROPICS_LATITUDE:
+        return True
+    month = date.month if lat >= 0 else (date.month + 5) % 12 + 1  # +6 months, 1-based
+    return month in LEAF_MONTHS
+
+
+def load_scene_strips(scene, leaves=True):
+    """Loads a scene's cleaned strips as (list of uint8 alpha arrays, bare),
+    each array height x width. `bare` is True when these are the winter strips;
+    it is False for a leafy request, and also when winter strips were asked for
+    but the scene has none (so the summer ones are returned instead). Callers
+    should cache this (e.g. via st.cache_resource) -- it's static data, loaded
+    from disk once."""
+    if not leaves:
+        bare_paths = sorted(glob.glob(os.path.join(_DATA_DIR, scene, "bare", "*.png")))
+        if bare_paths:
+            return [np.array(Image.open(path).convert("L")) for path in bare_paths], True
     paths = sorted(glob.glob(os.path.join(_DATA_DIR, scene, "*.png")))
     if not paths:
         raise FileNotFoundError(f"No horizon strips found for scene {scene!r} in {_DATA_DIR}")
-    return [np.array(Image.open(path).convert("L")) for path in paths]
+    return [np.array(Image.open(path).convert("L")) for path in paths], False
 
 
 def _chain_order(n_strips, n_needed, rng):
