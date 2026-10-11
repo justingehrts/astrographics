@@ -37,6 +37,7 @@ OUT_H = 480         # output height in px == 10 deg (48 px/deg), same for every 
 THRESHOLD = 128
 TRUNK_PX = 2.4      # trunk width for re-attached crowns (1x px)
 TRUNK_MAX_PX = 40   # never extend a trunk further than this (1x px)
+BARE_REF_H_FRAC = 0.094  # winter sources: height equal to 10 deg, as a fraction of canvas width
 FENCE_BAND = 0.22   # rural: bottom fraction of the strip cleaned gently (fences)
 END_LOWS = (0.30, 0.45, 0.60)  # "clear" = below this fraction of H; lowest that works wins
 END_WINDOW = 0.20   # look for a clear stretch within this fraction of each end
@@ -137,18 +138,32 @@ def clean_mask(gray, p):
     return m[pad:-pad, pad:-pad], attached
 
 
-def crop_to_ink_rows(gray):
-    """Winter sources come on a tall canvas with the strip in the middle band;
-    the strip's own height is what equals 10 deg, so crop to the ink."""
-    ink_rows = np.where((gray < THRESHOLD).any(axis=1))[0]
-    return gray[ink_rows.min():ink_rows.max() + 1]
+def crop_to_ground_and_ref_height(gray):
+    """Winter sources come on a tall canvas with the strip in the middle band.
+    Crop to the ground line and a fixed height above it (BARE_REF_H_FRAC of the
+    canvas width) instead of to the tallest tree: every strip from one
+    generator shares a scale, and sizing each by its own tallest tree would
+    make houses in a strip with shorter trees look bigger. The reference is
+    just above the tallest tree seen so far, so none is clipped."""
+    ink = gray < THRESHOLD
+    ink_rows = np.where(ink.any(axis=1))[0]
+    # The ground line is the lowest row that is mostly ink across the whole
+    # width; stray specks (lossy-format noise) below it must not move the crop.
+    bottom = np.where(ink.mean(axis=1) > 0.5)[0].max() + 1
+    ref_h = int(round(BARE_REF_H_FRAC * gray.shape[1]))
+    top = bottom - ref_h
+    if top < 0:
+        raise ValueError("canvas is shorter than the reference height")
+    if ink_rows.min() < top:
+        raise ValueError(f"tallest element is {bottom - ink_rows.min()} px, over the {ref_h} px reference")
+    return gray[top:bottom]
 
 
 def clean_strip(src, scene):
     gray = np.array(Image.open(src).convert("L"))
     bare = scene.endswith("-bare")
     if bare:
-        gray = crop_to_ink_rows(gray)
+        gray = crop_to_ground_and_ref_height(gray)
     m, attached = clean_mask(gray, PRESETS[scene])
     if scene == "rural" or bare:
         fine, _ = clean_mask(gray, BARE_GENTLE if bare else GENTLE)
@@ -204,6 +219,12 @@ def main(scene, out_dir, sources):
             # A tall tree at an end would be cut in half (or leave a cliff)
             # wherever the strip is chained to another.
             print(f"{name}: SKIPPED, no clear stretch at the {'left' if llev is None else 'right'} end")
+            continue
+        tallest = (m.shape[0] - np.where(m.any(axis=1))[0].min()) / m.shape[0]
+        if tallest < 0.5:
+            # Almost everything was dropped (typically a crop that missed the
+            # ground band, leaving only the band): never write that out.
+            print(f"{name}: SKIPPED, cleaned strip is only {tallest:.0%} of its height tall")
             continue
         written += 1
         a = to_alpha(m)
