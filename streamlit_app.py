@@ -16,7 +16,7 @@ from skyfield.api import wgs84, Star, Loader
 from skyfield.data import hipparcos
 from skyfield.magnitudelib import planetary_magnitude
 
-from astro import asterisms, atmosphere, constellations, extinction, horizon, location, moon, stars, treeline
+from astro import asterisms, atmosphere, clouds, constellations, extinction, horizon, location, moon, stars, treeline
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,49 @@ def cached_sky(az_min, az_max, alt_max, sun_alt, sun_az, turbidity, star_visibil
         moon_phase_angle_deg=moon_phase_angle_deg, moon_distance_km=moon_distance_km,
     )
     display = atmosphere.to_display(sky["rgb"], sky["zenith_total"], atmosphere.display_saturation(sun_alt))
-    return display, sky["luminance"], sky["zenith_dark"]
+    return display, sky["luminance"], sky["zenith_dark"], sky["rgb"], sky["zenith_total"]
+
+
+# Forecast clouds: the whole hourly series for a place and model, kept for
+# 3 hours. Time, date and view changes reuse it (interpolated locally); only a
+# new place, a new model or the expiry calls Open-Meteo again.
+@st.cache_data(ttl=3 * 3600, show_spinner="Fetching forecast clouds...")
+def cached_cloud_series(lat_rounded, lon_rounded, model_label):
+    return clouds.fetch_cloud_series(lat_rounded, lon_rounded, model_label)
+
+
+CLOUD_GRID_W, CLOUD_GRID_H = 768, 432  # the graphic's 16:9 shape
+
+
+def _upsample_bilinear(img, height, width):
+    """Bilinear resize of an (h, w, channels) array (both grids span the same
+    corners), in numpy only."""
+    h, w = img.shape[:2]
+    ys, xs = np.linspace(0, h - 1, height), np.linspace(0, w - 1, width)
+    y0 = np.clip(np.floor(ys).astype(int), 0, h - 2)
+    x0 = np.clip(np.floor(xs).astype(int), 0, w - 2)
+    fy, fx = (ys - y0)[:, None, None], (xs - x0)[None, :, None]
+    top = img[y0][:, x0] * (1 - fx) + img[y0][:, x0 + 1] * fx
+    bottom = img[y0 + 1][:, x0] * (1 - fx) + img[y0 + 1][:, x0 + 1] * fx
+    return top * (1 - fy) + bottom * fy
+
+
+@st.cache_data(max_entries=16, show_spinner=False)
+def cached_clouds(cover_grid, az_min, az_max, alt_max, sun_alt, sun_az, turbidity, star_visibility,
+                  sky_rgb_coarse, seed, moon_alt=None, moon_az=None, moon_illuminance=0.0, **moon_sky_kwargs):
+    """Cloud layer for the view as display RGBA (clouds composited over nothing,
+    with their own opacity), on the CLOUD_GRID. Lit and exposed exactly like the
+    sky so the two match."""
+    sky_rgb = _upsample_bilinear(sky_rgb_coarse, CLOUD_GRID_H, CLOUD_GRID_W)
+    zenith = atmosphere.compute_sky(np.array([[90.0]]), np.array([[0.0]]), sun_alt, sun_az, turbidity,
+                                    star_visibility, **moon_sky_kwargs)
+    rgb, alpha, _ = clouds.render_clouds(
+        cover_grid, az_min, az_max, alt_max, CLOUD_GRID_W, CLOUD_GRID_H, sun_alt, sun_az, turbidity,
+        star_visibility, sky_rgb, zenith["rgb"][0, 0], seed,
+        moon_alt=moon_alt, moon_az=moon_az, moon_illuminance=moon_illuminance,
+    )
+    display = atmosphere.to_display(rgb, zenith["zenith_total"], atmosphere.display_saturation(sun_alt))
+    return np.dstack([display, alpha])
 
 
 # Load the data models natively
@@ -370,6 +412,71 @@ horizon_has_leaves = season_has_leaves if foliage == "auto" else foliage == "on"
 if foliage == "auto":
     st.sidebar.caption(f"Auto: {'leaves' if season_has_leaves else 'bare trees'} for this date and latitude.")
 
+# Forecast clouds (off by default, so astronomy-event graphics stay clear).
+# Forecast mode draws the model's low/mid/high cover around the site, with
+# forecaster adjustments in percentage points; Manual sets the amounts directly.
+CLOUD_MODES = {"off": "Off", "forecast": "Forecast", "manual": "Manual"}
+CLOUD_MODEL_KEYS = {"best": "Best match (blend)", "hrrr": "HRRR", "gfs": "GFS", "ecmwf": "ECMWF"}
+
+
+def _url_triplet(name, default, lo, hi):
+    try:
+        values = [float(v) for v in st.query_params.get(name, "").split(",")]
+        if len(values) == 3:
+            return [float(np.clip(v, lo, hi)) for v in values]
+    except ValueError:
+        pass
+    return list(default)
+
+
+_url_clouds = st.query_params.get("clouds", "off")
+_seed_session_state_once("clouds_mode", _url_clouds if _url_clouds in CLOUD_MODES else "off")
+_url_cmodel = st.query_params.get("cmodel", "best")
+_seed_session_state_once("cloud_model", _url_cmodel if _url_cmodel in CLOUD_MODEL_KEYS else "best")
+for _key, _v in zip(("cloud_adj_low", "cloud_adj_mid", "cloud_adj_high"), _url_triplet("cadj", (0, 0, 0), -100, 100)):
+    _seed_session_state_once(_key, _v)
+for _key, _v in zip(("cloud_man_low", "cloud_man_mid", "cloud_man_high"), _url_triplet("cman", (30, 20, 20), 0, 100)):
+    _seed_session_state_once(_key, _v)
+
+clouds_mode = st.sidebar.selectbox(
+    "Clouds", list(CLOUD_MODES), format_func=CLOUD_MODES.get, key="clouds_mode",
+    help="Forecast draws the forecast model's low, mid and high cloud cover around your location at the "
+         "selected time (cloud shapes are illustrative; amounts and directions follow the forecast). "
+         "Manual sets the amounts yourself.",
+)
+cloud_cover_grid = None
+if clouds_mode == "forecast":
+    cloud_model = st.sidebar.selectbox("Forecast Model", list(CLOUD_MODEL_KEYS), format_func=CLOUD_MODEL_KEYS.get,
+                                       key="cloud_model")
+    cloud_adj = [
+        st.sidebar.slider("Adjust Low Clouds (points)", -100.0, 100.0, step=10.0, key="cloud_adj_low"),
+        st.sidebar.slider("Adjust Mid Clouds (points)", -100.0, 100.0, step=10.0, key="cloud_adj_mid"),
+        st.sidebar.slider("Adjust High Clouds (points)", -100.0, 100.0, step=10.0, key="cloud_adj_high"),
+    ]
+    try:
+        _when = datetime.combine(obs_date, obs_time, tzinfo=ZoneInfo(selected_tz))
+        # Plain floats: a numpy float (first load, from the URL) and a Python float
+        # (after any widget change) would otherwise be two cache entries for one place.
+        _series = cached_cloud_series(round(float(lat), 2), round(float(lon), 2), CLOUD_MODEL_KEYS[cloud_model])
+        _forecast_grid = clouds.cover_at_time(_series, _when)
+        cloud_cover_grid = clouds.adjust_cover(_forecast_grid, cloud_adj)
+        _site = 100 * _forecast_grid[:, 0, 0]
+        st.sidebar.caption(f"Forecast overhead at {obs_time.strftime('%I:%M %p').lstrip('0')}: "
+                           f"low {_site[0]:.0f}%, mid {_site[1]:.0f}%, high {_site[2]:.0f}% "
+                           f"({CLOUD_MODEL_KEYS[cloud_model]}).")
+    except ValueError as exc:
+        st.sidebar.caption(f"No cloud forecast: {exc}. Drawing a clear sky.")
+    except Exception:
+        logger.exception("Cloud forecast fetch failed")
+        st.sidebar.caption("Cloud forecast unavailable right now. Drawing a clear sky.")
+elif clouds_mode == "manual":
+    cloud_man = [
+        st.sidebar.slider("Low Clouds (%)", 0.0, 100.0, step=5.0, key="cloud_man_low"),
+        st.sidebar.slider("Mid Clouds (%)", 0.0, 100.0, step=5.0, key="cloud_man_mid"),
+        st.sidebar.slider("High Clouds (%)", 0.0, 100.0, step=5.0, key="cloud_man_high"),
+    ]
+    cloud_cover_grid = clouds.uniform_cover(*(v / 100.0 for v in cloud_man))
+
 # --- SIDEBAR: 4. LABELS & OVERLAYS ---
 st.sidebar.header("4. Labels & Overlays")
 
@@ -400,6 +507,12 @@ st.query_params["lock"] = "1" if lock_proportions else "0"
 st.query_params["turbidity"] = f"{turbidity:.1f}"
 st.query_params["brightness"] = f"{star_brightness:.1f}"
 st.query_params["leaves"] = foliage
+st.query_params["clouds"] = clouds_mode
+if clouds_mode == "forecast":
+    st.query_params["cmodel"] = st.session_state["cloud_model"]
+    st.query_params["cadj"] = ",".join(f"{st.session_state[k]:.0f}" for k in ("cloud_adj_low", "cloud_adj_mid", "cloud_adj_high"))
+elif clouds_mode == "manual":
+    st.query_params["cman"] = ",".join(f"{st.session_state[k]:.0f}" for k in ("cloud_man_low", "cloud_man_mid", "cloud_man_high"))
 
 with st.sidebar.expander("🔗 Shareable Link"):
     st.caption("This exact view (location, time, direction, and sky settings) is captured below. Append it to this app's base URL to share or bookmark it -- or just copy the address bar, which already reflects it.")
@@ -525,13 +638,35 @@ if st.button("Generate Sky Graphic", type="primary"):
         except Exception:
             logger.exception("Moon position for sky brightness failed; rendering without moonlight")
 
-        sky_display, sky_luminance, sky_zenith_dark = cached_sky(
+        sky_display, sky_luminance, sky_zenith_dark, sky_rgb_linear, _sky_zenith_total = cached_sky(
             az_min, az_max, alt_max, sun_deg, sun_az_deg, turbidity, star_brightness, **moon_sky_kwargs
         )
         # The sky is computed on a coarse grid; bilinear upscaling keeps the
         # gradient smooth (the default would nearest-neighbor it into stripes).
         ax.imshow(sky_display, extent=[az_min, az_max, 0, alt_max], origin="lower", aspect="auto",
                   interpolation="bilinear", zorder=0)
+
+        # Clouds sit in front of the stars, planets, Sun and Moon (they fade or
+        # vanish behind cloud) but under the horizon scene and the labels, which
+        # stay readable.
+        if cloud_cover_grid is not None and cloud_cover_grid.max() > 0:
+            try:
+                cloud_seed = int(abs(round(lat, 2) * 1000) + abs(round(lon, 2) * 1000)
+                                 + obs_date.toordinal() * 24 + obs_time.hour) % (2 ** 31)
+                moon_light = {}
+                if moon_sky_kwargs:
+                    moon_light = dict(
+                        moon_alt=moon_sky_kwargs["moon_alt_deg"], moon_az=moon_sky_kwargs["moon_az_deg"],
+                        moon_illuminance=atmosphere.moon_illuminance_lux(
+                            moon_sky_kwargs["moon_phase_angle_deg"], moon_sky_kwargs["moon_distance_km"]),
+                    )
+                cloud_rgba = cached_clouds(cloud_cover_grid, az_min, az_max, alt_max, sun_deg, sun_az_deg,
+                                           turbidity, star_brightness, sky_rgb_linear, cloud_seed,
+                                           **moon_light, **moon_sky_kwargs)
+                ax.imshow(cloud_rgba, extent=[az_min, az_max, 0, alt_max], origin="lower", aspect="auto",
+                          interpolation="bilinear", zorder=60)
+            except Exception:
+                logger.exception("Cloud rendering failed; drawing a clear sky")
 
         # Reference-overlay styling (altitude gridlines, compass lines):
         # needs to stay legible against both a bright daytime sky and a

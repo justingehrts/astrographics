@@ -111,6 +111,19 @@ def _lookup_light_columns(h, mu):
     return out
 
 
+def transmittance_to_light(height_m, mu, turbidity):
+    """Fraction of a distant light source's light (linear RGB, 0-1) that
+    reaches a point at `height_m`, the source being at direction cosine `mu`
+    from that point's local vertical. Zero in the Earth's shadow. Used to
+    light clouds: high clouds stay sunlit (and reddened) after the Sun has set
+    for the ground."""
+    height_m = np.broadcast_to(np.asarray(height_m, float), np.shape(mu))
+    beta_m_ext = mie_beta(turbidity) / MIE_SINGLE_SCATTER_ALBEDO
+    cols = _lookup_light_columns(height_m, np.asarray(mu, float))
+    tau = RAYLEIGH_BETA * cols[..., 0:1] + beta_m_ext * cols[..., 1:2] + OZONE_ABSORPTION * cols[..., 2:3]
+    return np.exp(-tau)
+
+
 def mie_beta(turbidity):
     """Aerosol scattering coefficient at sea level per color channel."""
     aerosol_optical_depth_550 = 0.02 + max(turbidity - 1.0, 0.0) * 0.06
