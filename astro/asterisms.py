@@ -17,8 +17,10 @@ ASTERISMS = [
             (54061, 53910, 58001, 59774, 54061),
             (59774, 62956, 65378, 67301),
         ],
-        # The "pointer" stars Merak and Dubhe, extended to Polaris.
-        "guides": [(53910, 54061, 11767)],
+        # The "pointer" stars Merak and Dubhe, extended to Polaris. The guide starts at
+        # Dubhe because Merak-Dubhe is already a solid bowl edge; dashing it too would
+        # draw dashes over the solid line.
+        "guides": [(54061, 11767)],
     },
     {
         "name": "Summer Triangle",
