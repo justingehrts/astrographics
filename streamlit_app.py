@@ -16,7 +16,7 @@ from skyfield.api import wgs84, Star, Loader
 from skyfield.data import hipparcos
 from skyfield.magnitudelib import planetary_magnitude
 
-from astro import atmosphere, constellations, extinction, horizon, location, moon, stars, treeline
+from astro import asterisms, atmosphere, constellations, extinction, horizon, location, moon, stars, treeline
 
 logger = logging.getLogger(__name__)
 
@@ -377,6 +377,13 @@ show_labels = st.sidebar.checkbox("Show Planet/Moon Labels", value=True)
 show_major_star_labels = st.sidebar.checkbox("Show Major Star Labels", value=True)
 show_minor_star_labels = st.sidebar.checkbox("Show Minor Star Labels", value=False)
 show_constellations = st.sidebar.checkbox("Show Constellation Lines", value=True)
+show_asterisms = st.sidebar.checkbox(
+    "Show Asterisms", value=False,
+    help="Familiar patterns that cross constellations or get lost inside a full figure: Big Dipper "
+         "(with its pointers to Polaris), Summer and Winter Triangles, Winter Hexagon, Orion's Belt, "
+         "and the Great Square.",
+)
+show_asterism_names = st.sidebar.checkbox("Show Asterism Names", value=False)
 show_altitude_gridlines = st.sidebar.checkbox("Show Altitude Gridlines", value=False)
 show_compass_lines = st.sidebar.checkbox("Show Compass Direction Lines", value=False)
 
@@ -783,17 +790,22 @@ if st.button("Generate Sky Graphic", type="primary"):
                         ax.text(az_val + 0.4, alt_val + 0.4, f"HIP {hip_id}", color="#ffffff", fontsize=7, alpha=0.35,
                                 path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
-        # --- CONSTELLATION STICK FIGURES ---
-        # A reference overlay, independent of the star limit above. The stars
+        # --- CONSTELLATION STICK FIGURES AND ASTERISMS ---
+        # Reference overlays, independent of the star limit above. The stars
         # that form each figure are always drawn (faintly) with it, so the lines
         # never float without anything to point at -- even when twilight or the
         # Star Visibility Limit would hide those stars. Lines and guide stars
-        # fade in over the first few degrees of deepening twilight.
-        if show_constellations and sun_deg <= -6:
+        # fade in over the first few degrees of deepening twilight. Asterisms
+        # are drawn warmer and heavier than constellations so both read together.
+        if (show_constellations or show_asterisms) and sun_deg <= -6:
             try:
                 guide_fade = 0.3 + 0.7 * float(np.clip((-6.0 - sun_deg) / 4.0, 0.0, 1.0))
-                seg_hip_ids = sorted({hip for pair in CONSTELLATION_SEGMENTS for hip in pair})
-                seg_stars = stars_df.loc[stars_df.index.intersection(seg_hip_ids)]
+                wanted_hips = set()
+                if show_constellations:
+                    wanted_hips |= {hip for pair in CONSTELLATION_SEGMENTS for hip in pair}
+                if show_asterisms:
+                    wanted_hips |= asterisms.all_hips()
+                seg_stars = stars_df.loc[stars_df.index.intersection(sorted(wanted_hips))]
                 seg_star_obj = Star.from_dataframe(seg_stars)
                 seg_astrometric = observer_loc.at(t).observe(seg_star_obj)
                 seg_alt, seg_az, _ = seg_astrometric.apparent().altaz(temperature_C=STANDARD_TEMPERATURE_C, pressure_mbar=STANDARD_PRESSURE_MBAR)
@@ -804,16 +816,44 @@ if st.button("Generate Sky Graphic", type="primary"):
                 def seg_in_view(pos):
                     return az_min <= pos[0] <= az_max and 0 <= pos[1] <= alt_max
 
-                anchored = set()
-                for hip_a, hip_b in CONSTELLATION_SEGMENTS:
+                def visible_pair(hip_a, hip_b):
+                    """Both end positions when the line is fully in view, else None."""
                     pa, pb = pos_by_hip.get(hip_a), pos_by_hip.get(hip_b)
-                    if pa is None or pb is None or not (seg_in_view(pa) and seg_in_view(pb)):
-                        continue
-                    ax.plot([pa[0], pb[0]], [pa[1], pb[1]], color="#7dd3fc", alpha=0.35 * guide_fade,
-                            linewidth=0.8, zorder=15)
-                    anchored.update((hip_a, hip_b))
+                    return (pa, pb) if pa is not None and pb is not None and seg_in_view(pa) and seg_in_view(pb) else None
 
-                # Guide stars at the figure's vertices, except those the regular
+                anchored = set()
+                if show_constellations:
+                    for hip_a, hip_b in CONSTELLATION_SEGMENTS:
+                        pair = visible_pair(hip_a, hip_b)
+                        if pair is None:
+                            continue
+                        (az_a, alt_a), (az_b, alt_b) = pair
+                        ax.plot([az_a, az_b], [alt_a, alt_b], color="#7dd3fc", alpha=0.35 * guide_fade,
+                                linewidth=0.8, zorder=15)
+                        anchored.update((hip_a, hip_b))
+
+                if show_asterisms:
+                    for asterism in asterisms.ASTERISMS:
+                        drawn_points = []  # solid lines only: a dashed pointer must not drag the name away
+                        for hip_a, hip_b, dashed in asterisms.lines(asterism):
+                            pair = visible_pair(hip_a, hip_b)
+                            if pair is None:
+                                continue
+                            (az_a, alt_a), (az_b, alt_b) = pair
+                            ax.plot([az_a, az_b], [alt_a, alt_b], color="#fcd34d", alpha=0.7 * guide_fade,
+                                    linewidth=1.3, linestyle=(0, (4, 3)) if dashed else "-", zorder=16)
+                            anchored.update((hip_a, hip_b))
+                            if not dashed:
+                                drawn_points += [(az_a, alt_a), (az_b, alt_b)]
+                        if show_asterism_names and drawn_points:
+                            name_az = float(np.mean([pt[0] for pt in drawn_points]))
+                            name_alt = max(pt[1] for pt in drawn_points) + 1.5
+                            if name_alt <= alt_max and name_alt > horizon_top_at(name_az):
+                                ax.text(name_az, name_alt, asterism["name"], color="#fde68a", fontsize=9,
+                                        ha="center", va="bottom", alpha=0.85 * guide_fade,
+                                        path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
+
+                # Guide stars at the figures' vertices, except those the regular
                 # star pass above already drew at their true brightness.
                 guide = [h for h in sorted(anchored) if h not in drawn_hips]
                 if guide:
@@ -827,7 +867,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                     plot_point_sources(ax, g_az, g_alt, g_mag, g_rgb,
                                        np.full(len(guide), 0.7 * guide_fade), zorder=19)
             except Exception:
-                logger.exception("Failed to draw constellation lines")
+                logger.exception("Failed to draw constellation lines/asterisms")
 
         # 6. HORIZON SILHOUETTE (geometry computed before section 4)
         if terrain_top is not None:
