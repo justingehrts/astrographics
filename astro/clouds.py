@@ -215,11 +215,11 @@ def _value_noise(x, y, seed):
 # deck; `lp_gain` = how strongly city light brightens its base at night.
 LAYER_STYLE = {
     "low": dict(height_km=1.5, scale_km=0.9, octaves=7, gain=0.52, stretch=1.3, warp=0.45, billow=True,
-                edge=0.035, thicken=0.25, opacity=0.97, transmit=0.16, side=0.55, lp_gain=6.0),
+                edge=0.15, thicken=0.25, opacity=0.97, transmit=0.16, side=0.55, lp_gain=6.0),
     "mid": dict(height_km=4.5, scale_km=1.4, octaves=7, gain=0.55, stretch=1.6, warp=0.35, billow=True,
-                edge=0.05, thicken=0.12, opacity=0.92, transmit=0.28, side=0.45, lp_gain=2.5),
+                edge=0.17, thicken=0.12, opacity=0.92, transmit=0.28, side=0.45, lp_gain=2.5),
     "high": dict(height_km=9.0, scale_km=12.0, octaves=7, gain=0.62, stretch=7.0, warp=0.25, billow=False,
-                 edge=0.22, thicken=0.0, opacity=0.35, transmit=0.85, side=0.25, lp_gain=0.6),
+                 edge=0.32, thicken=0.0, opacity=0.35, transmit=0.85, side=0.25, lp_gain=0.6),
 }
 
 
@@ -290,7 +290,10 @@ def _layer_alpha(layer, cover_grid, az, alt, d_km, footprint_km, seed):
     # Crisp edges at full detail; where detail is filtered away, the expected
     # opacity tends to the cover itself.
     width = style["edge"] + (1.0 - style["edge"]) * (1.0 - detail)
-    alpha = np.clip((n - (1.0 - c)) / width + 0.5, 0.0, 1.0)
+    ramp = np.clip((n - (1.0 - c)) / width + 0.5, 0.0, 1.0)
+    # Smoothstep: rims fade in gradually rather than ending at a hard line.
+    # Symmetric about the threshold, so the mean coverage is unchanged.
+    alpha = ramp * ramp * (3.0 - 2.0 * ramp)
     alpha = np.where(c <= 0.0, 0.0, alpha)
     # How deep inside the cloud this point is (0 at a thin edge, 1 in a thick
     # core); where detail is filtered away, use the cover as the average.
