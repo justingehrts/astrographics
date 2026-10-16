@@ -124,8 +124,20 @@ def cached_sky(az_min, az_max, alt_max, sun_alt, sun_az, turbidity, star_visibil
 # 3 hours. Time, date and view changes reuse it (interpolated locally); only a
 # new place, a new model or the expiry calls Open-Meteo again.
 @st.cache_data(ttl=3 * 3600, show_spinner="Fetching forecast clouds...")
-def cached_cloud_series(lat_rounded, lon_rounded, model_label):
+def _cloud_series_3h(lat_rounded, lon_rounded, model_label):
     return clouds.fetch_cloud_series(lat_rounded, lon_rounded, model_label)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def cached_cloud_series(lat_rounded, lon_rounded, model_label):
+    """The 3-hour cached series, or None if the fetch failed. Streamlit never
+    caches an exception, so without this a failing model would be requested
+    again on every rerun; a failure is remembered for 10 minutes instead."""
+    try:
+        return _cloud_series_3h(lat_rounded, lon_rounded, model_label)
+    except Exception:
+        logger.exception("Cloud forecast fetch failed for %s", model_label)
+        return None
 
 
 CLOUD_GRID_W, CLOUD_GRID_H = 768, 432  # the graphic's 16:9 shape
@@ -448,27 +460,41 @@ cloud_cover_grid = None
 if clouds_mode == "forecast":
     cloud_model = st.sidebar.selectbox("Forecast Model", list(CLOUD_MODEL_KEYS), format_func=CLOUD_MODEL_KEYS.get,
                                        key="cloud_model")
-    cloud_adj = [
-        st.sidebar.slider("Adjust Low Clouds (points)", -100.0, 100.0, step=10.0, key="cloud_adj_low"),
-        st.sidebar.slider("Adjust Mid Clouds (points)", -100.0, 100.0, step=10.0, key="cloud_adj_mid"),
-        st.sidebar.slider("Adjust High Clouds (points)", -100.0, 100.0, step=10.0, key="cloud_adj_high"),
-    ]
-    try:
-        _when = datetime.combine(obs_date, obs_time, tzinfo=ZoneInfo(selected_tz))
-        # Plain floats: a numpy float (first load, from the URL) and a Python float
-        # (after any widget change) would otherwise be two cache entries for one place.
-        _series = cached_cloud_series(round(float(lat), 2), round(float(lon), 2), CLOUD_MODEL_KEYS[cloud_model])
-        _forecast_grid = clouds.cover_at_time(_series, _when)
-        cloud_cover_grid = clouds.adjust_cover(_forecast_grid, cloud_adj)
-        _site = 100 * _forecast_grid[:, 0, 0]
-        st.sidebar.caption(f"Forecast overhead at {obs_time.strftime('%I:%M %p').lstrip('0')}: "
-                           f"low {_site[0]:.0f}%, mid {_site[1]:.0f}%, high {_site[2]:.0f}% "
-                           f"({CLOUD_MODEL_KEYS[cloud_model]}).")
-    except ValueError as exc:
-        st.sidebar.caption(f"No cloud forecast: {exc}. Drawing a clear sky.")
-    except Exception:
-        logger.exception("Cloud forecast fetch failed")
-        st.sidebar.caption("Cloud forecast unavailable right now. Drawing a clear sky.")
+    _when = datetime.combine(obs_date, obs_time, tzinfo=ZoneInfo(selected_tz))
+    # Every model's overhead amounts side by side, so it is clear whether the
+    # models actually disagree. Each is its own 3-hour cache entry, so switching
+    # models never refetches. Plain floats: a numpy float (first load, from the
+    # URL) and a Python float (after any widget change) would otherwise be two
+    # cache entries for one place.
+    _place = (round(float(lat), 2), round(float(lon), 2))
+    _forecast_by_model, _compare_lines = {}, []
+    for _key, _label in CLOUD_MODEL_KEYS.items():
+        _mark = "▸ " if _key == cloud_model else ""
+        try:
+            _series = cached_cloud_series(*_place, _label)
+            if _series is None:
+                raise RuntimeError("fetch failed")
+            _forecast_by_model[_key] = clouds.cover_at_time(_series, _when)
+            _o = 100 * _forecast_by_model[_key][:, 0, 0]
+            _compare_lines.append(f"{_mark}{_label}: low {_o[0]:.0f}% · mid {_o[1]:.0f}% · high {_o[2]:.0f}%")
+        except ValueError:
+            _compare_lines.append(f"{_mark}{_label}: no forecast for this time")
+        except RuntimeError:
+            _compare_lines.append(f"{_mark}{_label}: unavailable")
+    with st.sidebar.expander("Adjust forecast amounts", expanded=False):
+        cloud_adj = [
+            st.slider("Adjust Low Clouds (points)", -100.0, 100.0, step=10.0, key="cloud_adj_low"),
+            st.slider("Adjust Mid Clouds (points)", -100.0, 100.0, step=10.0, key="cloud_adj_mid"),
+            st.slider("Adjust High Clouds (points)", -100.0, 100.0, step=10.0, key="cloud_adj_high"),
+        ]
+    if cloud_model in _forecast_by_model:
+        cloud_cover_grid = clouds.adjust_cover(_forecast_by_model[cloud_model], cloud_adj)
+    st.sidebar.caption(
+        f"Overhead at {obs_time.strftime('%I:%M %p').lstrip('0')}:  \n" + "  \n".join(_compare_lines)
+        + "  \nCloud shapes are illustrative and stay the same between models; the amount and where it "
+          "sits (by direction) follow the selected model."
+        + ("" if cloud_cover_grid is not None else "  \nNo forecast from the selected model: drawing a clear sky.")
+    )
 elif clouds_mode == "manual":
     cloud_man = [
         st.sidebar.slider("Low Clouds (%)", 0.0, 100.0, step=5.0, key="cloud_man_low"),
@@ -1032,11 +1058,16 @@ if st.button("Generate Sky Graphic", type="primary"):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        st.pyplot(fig)
-
+        # One PNG for both the screen and the download. The axes fill the figure,
+        # so no "tight" cropping: that, and st.pyplot's default 0.1" padding,
+        # added a transparent margin that showed up as a white border.
         img_buf = io.BytesIO()
-        fig.savefig(img_buf, format="png", dpi=150, facecolor="none", edgecolor="none", bbox_inches="tight", pad_inches=0.0)
+        fig.savefig(img_buf, format="png", dpi=150, facecolor="none", edgecolor="none")
         img_buf.seek(0)
+        try:
+            st.image(img_buf.getvalue(), width="stretch")
+        except Exception:  # older Streamlit without width="stretch"
+            st.image(img_buf.getvalue(), use_container_width=True)
 
         st.download_button(label="💾 Download High-Res PNG for Editing / On-Air", data=img_buf, file_name=f"custom_sky_{bearing:.0f}deg.png", mime="image/png")
         plt.close(fig)
