@@ -38,7 +38,7 @@ PAST_DAYS = 1
 MODELS = {
     "Best match (blend)": None,
     "HRRR": "gfs_hrrr",
-    "GFS": "gfs_seamless",
+    "GFS": "gfs_global",  # not gfs_seamless: that blends HRRR in over the US, so it matched HRRR
     "ECMWF": "ecmwf_ifs025",
 }
 

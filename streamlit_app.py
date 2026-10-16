@@ -550,6 +550,9 @@ with st.sidebar.expander("🔗 Shareable Link"):
 # behind the tree line is still identified, with a dark outline so the text
 # reads against bright twilight and the silhouette alike.
 LABEL_ZORDER = 110
+# Gridlines and compass lines sit above the clouds (60) and everything under
+# them, but below the horizon scene (100), which hides them like any distant object.
+OVERLAY_LINE_ZORDER, OVERLAY_TEXT_ZORDER = 70, 71
 LABEL_OUTLINE = [patheffects.withStroke(linewidth=2.5, foreground="#000000", alpha=0.55)]
 
 
@@ -1041,16 +1044,16 @@ if st.button("Generate Sky Graphic", type="primary"):
         if show_altitude_gridlines:
             for alt_tick in np.arange(10, alt_max, 10):
                 ax.axhline(alt_tick, color=grid_line_color, alpha=0.75, linestyle='--',
-                           linewidth=1.1, path_effects=grid_outline, zorder=2)
+                           linewidth=1.1, path_effects=grid_outline, zorder=OVERLAY_LINE_ZORDER)
                 ax.text(az_min + 0.5, alt_tick + 0.3, f"{int(alt_tick)}°", color=grid_text_color,
-                        fontsize=9, alpha=0.95, path_effects=grid_outline, zorder=3)
+                        fontsize=9, alpha=0.95, path_effects=grid_outline, zorder=OVERLAY_TEXT_ZORDER)
 
         if show_compass_lines:
             for compass_az, compass_label in compass_ticks(az_min, az_max):
                 ax.axvline(compass_az, color=grid_line_color, alpha=0.75, linestyle='--',
-                           linewidth=1.1, path_effects=grid_outline, zorder=2)
+                           linewidth=1.1, path_effects=grid_outline, zorder=OVERLAY_LINE_ZORDER)
                 ax.text(compass_az, alt_max - 1.5, compass_label, color=grid_text_color, ha='center',
-                        fontsize=9, alpha=0.95, path_effects=grid_outline, zorder=3)
+                        fontsize=9, alpha=0.95, path_effects=grid_outline, zorder=OVERLAY_TEXT_ZORDER)
 
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)
