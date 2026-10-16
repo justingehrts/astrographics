@@ -748,7 +748,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             st.info(f"Winter (bare-tree) art isn't available for the {horizon_scene} scene yet; "
                     "showing it with leaves.")
         treeline_rgba, treeline_extent = treeline.tiled_treeline(
-            horizon_strips, az_min, az_max, treeline_seed,
+            horizon_strips, az_min, az_max, treeline_seed, height_deg=treeline.scene_height_deg(horizon_scene),
         )
 
         _fg_az, _fg_top = treeline.silhouette_top_profile(treeline_rgba, treeline_extent)
