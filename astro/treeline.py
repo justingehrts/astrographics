@@ -10,8 +10,9 @@ scene, each about 80 degrees of sky wide. tools/clean_horizon_strip.py turns
 the raw strips into the alpha masks in data/horizon/<scene>/ -- crisp edges
 (blur and JPEG damage removed), windows filled, tree crowns reattached to a
 trunk, and both ends trimmed to a low fence/lawn stretch. Every strip is
-stored at the same scale (OUT_H px == TREE_HEIGHT_DEG), so a house or tree has
-the same angular size wherever it is placed.
+stored at the same scale (OUT_H px == the scene's height, 10 degrees for suburb
+and countryside, 15 for the city), so a house or tree has the same angular size
+wherever it is placed within a scene.
 
 Each scene has a summer set (leaves on the trees) in data/horizon/<scene>/ and
 a winter set (bare deciduous trees, evergreens kept) in data/horizon/<scene>/bare/.
@@ -45,6 +46,17 @@ SILHOUETTE_COLOR_RGB = (6, 12, 20)  # matches the app's #060c14 foreground color
 # A distant treeline realistically subtends about this many degrees; every
 # strip's pixel height corresponds to it.
 TREE_HEIGHT_DEG = 10.0
+
+# Per-scene scale. Suburban and rural art is drawn so its tallest trees reach
+# 10 degrees. Downtown towers seen from within a city loom far more than that
+# (a 150 m tower 500 m away is ~17 degrees), so the urban strips are drawn
+# larger by the same factor in both directions, as if the city were closer.
+SCENE_HEIGHT_DEG = {"urban": 15.0, "suburban": 10.0, "rural": 10.0}
+
+
+def scene_height_deg(scene):
+    """Angular height of a scene's strips (their pixel height), in degrees."""
+    return SCENE_HEIGHT_DEG.get(scene, TREE_HEIGHT_DEG)
 
 # Star Visibility Limit (the sidebar slider) at or below which each scene is
 # used: 1.0-1.5 city, 2.0-3.0 suburb, 3.5 and up countryside.
@@ -104,14 +116,14 @@ def _chain_order(n_strips, n_needed, rng):
     return order
 
 
-def tiled_treeline(strips, az_min, az_max, seed):
+def tiled_treeline(strips, az_min, az_max, seed, height_deg=TREE_HEIGHT_DEG):
     """Returns (rgba_array, extent) ready to hand straight to
     `ax.imshow(rgba_array, extent=extent, ...)`: the scene's strips chained
     in a seeded random order and cropped to cover [az_min, az_max] at a fixed
-    angular height (TREE_HEIGHT_DEG), independent of alt_max -- see the module
+    angular height (`height_deg`, see SCENE_HEIGHT_DEG), independent of alt_max -- see the module
     docstring for why. The array is uint8 RGBA, silhouette-colored."""
     height = strips[0].shape[0]
-    px_per_deg = height / TREE_HEIGHT_DEG
+    px_per_deg = height / height_deg
     span = az_max - az_min
     needed_px = max(1, int(np.ceil(span * px_per_deg)))
 
@@ -129,7 +141,7 @@ def tiled_treeline(strips, az_min, az_max, seed):
     rgba[..., 0], rgba[..., 1], rgba[..., 2] = SILHOUETTE_COLOR_RGB
     rgba[..., 3] = alpha
 
-    extent = [az_min, az_max, 0, TREE_HEIGHT_DEG]
+    extent = [az_min, az_max, 0, height_deg]
     return rgba, extent
 
 
