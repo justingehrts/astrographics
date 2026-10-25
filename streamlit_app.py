@@ -1,5 +1,6 @@
 import logging
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 import matplotlib
@@ -1160,15 +1161,30 @@ if st.button("Generate Sky Graphic", type="primary"):
             preview = io.BytesIO()
             fig.savefig(preview, format="png", dpi=dpi, facecolor="none", edgecolor="none")
             preview_bytes = preview.getvalue()
+        st.download_button(label="💾 Download High-Res PNG for Editing / On-Air", data=img_buf,
+                           file_name=f"custom_sky_{bearing:.0f}deg" + ("" if image_format == DEFAULT_FORMAT else f"_{image_format}") + ".png",
+                           mime="image/png")
+        # Fit the preview to the window: scale to the smaller of the window width
+        # and height (tall 9:16 / 4:5 images no longer need scrolling), centered.
+        st.markdown(
+            "<style>"
+            "[data-testid='stFullScreenFrame'] {display: flex; justify-content: center;}"
+            "[data-testid='stImage'] img {width: auto !important; max-width: 100%; "
+            "max-height: calc(100vh - 140px); object-fit: contain; scroll-margin-top: 70px;}"
+            "</style>",
+            unsafe_allow_html=True,
+        )
         try:
             st.image(preview_bytes, width="stretch")
         except Exception:  # older Streamlit without width="stretch"
             st.image(preview_bytes, use_container_width=True)
+        # Bring the finished image to the top of the window.
+        components.html(
+            "<script>let n = 0; const t = setInterval(() => {"
+            "const i = window.parent.document.querySelector(\"[data-testid='stImage'] img\");"
+            "if (i && i.complete) {i.scrollIntoView({block: 'start'});}"
+            "if (++n > 15) clearInterval(t);}, 150);</script>", height=0)
         if show_safe_zones and zone:
             st.caption("Red bands mark where social apps cover the image with their own interface. "
                        "They are a guide only and are not in the download.")
-
-        st.download_button(label="💾 Download High-Res PNG for Editing / On-Air", data=img_buf,
-                           file_name=f"custom_sky_{bearing:.0f}deg" + ("" if image_format == DEFAULT_FORMAT else f"_{image_format}") + ".png",
-                           mime="image/png")
         plt.close(fig)
