@@ -28,20 +28,59 @@ logger = logging.getLogger(__name__)
 STANDARD_TEMPERATURE_C = 10.0
 STANDARD_PRESSURE_MBAR = 1010.0
 
-# The graphic is drawn 16:9. A degree takes the same space horizontally and
-# vertically (no stretching of trees, houses or the Moon) when the altitude
-# shown is the field-of-view width times height/width.
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 12.0, 6.75
+# Image formats. 16:9 is the default; the others are for social media. A degree
+# takes the same space horizontally and vertically (no stretching of trees,
+# houses or the Moon) when the altitude shown is the field-of-view width times
+# height/width. Every format's figure has the same area (so fonts, lines and
+# markers read alike) and is saved at the pixel size its platforms expect.
+FIGURE_AREA_IN2 = 81.0  # 12 x 6.75 in, the original 16:9 figure
+FORMATS = {
+    "16x9": dict(label="16:9 landscape (default)", aspect=(16, 9), export_px=(1920, 1080), default_fov=80.0,
+                 safe_zone=None),
+    "9x16": dict(label="9:16 vertical (Stories, Reels, TikTok, Shorts)", aspect=(9, 16), export_px=(1080, 1920),
+                 default_fov=45.0, safe_zone=dict(top=0.14, bottom=0.20, side=0.0)),
+    "4x5": dict(label="4:5 portrait (Instagram, Facebook feed)", aspect=(4, 5), export_px=(1080, 1350),
+                default_fov=60.0, safe_zone=dict(top=0.05, bottom=0.05, side=0.05)),
+    "1x1": dict(label="1:1 square (any feed)", aspect=(1, 1), export_px=(1080, 1080), default_fov=70.0,
+                safe_zone=None),
+}
+DEFAULT_FORMAT = "16x9"
 ALT_MAX_RANGE = (20.0, 90.0)
 ALT_MAX_STEP = 5.0
+FOV_RANGE = (30.0, 180.0)
+FOV_STEP = 5.0
 
 
-def natural_altitude_for_fov(fov_deg):
-    """Max altitude that gives equal-angle proportions for `fov_deg`,
-    rounded to the altitude slider's step and limited to its range."""
-    ideal = fov_deg * FIG_HEIGHT_IN / FIG_WIDTH_IN
+def figure_size_in(fmt):
+    """(width, height) in inches of a format's figure: same area for all."""
+    aw, ah = FORMATS[fmt]["aspect"]
+    width = (FIGURE_AREA_IN2 * aw / ah) ** 0.5
+    return width, FIGURE_AREA_IN2 / width
+
+
+def export_dpi(fmt):
+    return FORMATS[fmt]["export_px"][0] / figure_size_in(fmt)[0]
+
+
+def natural_altitude_for_fov(fov_deg, fmt=DEFAULT_FORMAT):
+    """Max altitude that gives equal-angle proportions for `fov_deg` in a
+    format, rounded to the altitude slider's step and limited to its range."""
+    fig_w, fig_h = figure_size_in(fmt)
+    ideal = fov_deg * fig_h / fig_w
     stepped = np.floor(ideal / ALT_MAX_STEP + 0.5) * ALT_MAX_STEP
     return float(np.clip(stepped, *ALT_MAX_RANGE))
+
+
+def max_fov_for_lock(fmt):
+    """Widest view whose natural altitude still fits the altitude limit
+    (vertical formats cannot be wide: 9:16 tops out near 50 degrees)."""
+    fig_w, fig_h = figure_size_in(fmt)
+    widest = ALT_MAX_RANGE[1] * fig_w / fig_h
+    return float(np.clip(np.floor(widest / FOV_STEP) * FOV_STEP, FOV_RANGE[0], FOV_RANGE[1]))
+
+
+# Figure size in inches; set from the chosen format in the sidebar (below).
+FIG_WIDTH_IN, FIG_HEIGHT_IN = figure_size_in(DEFAULT_FORMAT)
 
 # Set page layout to wide for a clean dashboard feel
 st.set_page_config(layout="wide", page_title="Custom Sky Graphic Generator")
@@ -140,7 +179,14 @@ def cached_cloud_series(lat_rounded, lon_rounded, model_label):
         return None
 
 
-CLOUD_GRID_W, CLOUD_GRID_H = 768, 432  # the graphic's 16:9 shape
+CLOUD_GRID_LONG_SIDE = 768  # pixels on the longer side; the other follows the image format
+
+
+def cloud_grid_size(fmt):
+    """(width, height) of the cloud layer's grid, in the image format's shape."""
+    aw, ah = FORMATS[fmt]["aspect"]
+    scale = CLOUD_GRID_LONG_SIDE / max(aw, ah)
+    return int(round(aw * scale)), int(round(ah * scale))
 
 
 def _upsample_bilinear(img, height, width):
@@ -158,15 +204,15 @@ def _upsample_bilinear(img, height, width):
 
 @st.cache_data(max_entries=16, show_spinner=False)
 def cached_clouds(cover_grid, az_min, az_max, alt_max, sun_alt, sun_az, turbidity, star_visibility,
-                  sky_rgb_coarse, seed, moon_alt=None, moon_az=None, moon_illuminance=0.0, **moon_sky_kwargs):
+                  sky_rgb_coarse, seed, grid_w, grid_h, moon_alt=None, moon_az=None, moon_illuminance=0.0, **moon_sky_kwargs):
     """Cloud layer for the view as display RGBA (clouds composited over nothing,
-    with their own opacity), on the CLOUD_GRID. Lit and exposed exactly like the
+    with their own opacity), on a grid in the image format's shape. Lit and exposed exactly like the
     sky so the two match."""
-    sky_rgb = _upsample_bilinear(sky_rgb_coarse, CLOUD_GRID_H, CLOUD_GRID_W)
+    sky_rgb = _upsample_bilinear(sky_rgb_coarse, grid_h, grid_w)
     zenith = atmosphere.compute_sky(np.array([[90.0]]), np.array([[0.0]]), sun_alt, sun_az, turbidity,
                                     star_visibility, **moon_sky_kwargs)
     rgb, alpha, _ = clouds.render_clouds(
-        cover_grid, az_min, az_max, alt_max, CLOUD_GRID_W, CLOUD_GRID_H, sun_alt, sun_az, turbidity,
+        cover_grid, az_min, az_max, alt_max, grid_w, grid_h, sun_alt, sun_az, turbidity,
         star_visibility, sky_rgb, zenith["rgb"][0, 0], seed,
         moon_alt=moon_alt, moon_az=moon_az, moon_illuminance=moon_illuminance,
     )
@@ -284,10 +330,12 @@ try:
     url_bearing = np.clip(float(st.query_params.get("bearing", 225.0)), 0.0, 359.0)
 except ValueError:
     url_bearing = 225.0
+_url_fmt = st.query_params.get("fmt", DEFAULT_FORMAT)
+url_fmt = _url_fmt if _url_fmt in FORMATS else DEFAULT_FORMAT
 try:
-    url_fov = np.clip(float(st.query_params.get("fov", 80.0)), 30.0, 180.0)
+    url_fov = np.clip(float(st.query_params.get("fov", FORMATS[url_fmt]["default_fov"])), *FOV_RANGE)
 except ValueError:
-    url_fov = 80.0
+    url_fov = FORMATS[url_fmt]["default_fov"]
 try:
     url_altmax = np.clip(float(st.query_params.get("altmax", 45.0)), 20.0, 90.0)
 except ValueError:
@@ -328,6 +376,12 @@ _seed_session_state_once("bearing", url_bearing)
 _seed_session_state_once("fov_width", url_fov)
 _seed_session_state_once("alt_max", url_altmax)
 _seed_session_state_once("lock_proportions", url_lock)
+_seed_session_state_once("image_format", url_fmt)
+
+
+def _apply_format_defaults():
+    """Picking a format starts from that format's natural view width."""
+    st.session_state["fov_width"] = FORMATS[st.session_state["image_format"]]["default_fov"]
 
 st.sidebar.selectbox(
     "Direction Preset", list(DIRECTION_PRESETS.keys()),
@@ -337,16 +391,28 @@ bearing = st.sidebar.slider(
     "Compass Bearing (0=N, 90=E, 180=S, 270=W)", 0.0, 359.0, step=1.0,
     key="bearing", on_change=_clear_preset_if_bearing_diverged,
 )
-fov_width = st.sidebar.slider("Field of View Width (deg)", 30.0, 180.0, step=5.0, key="fov_width")
+image_format = st.sidebar.selectbox(
+    "Image Format", list(FORMATS), format_func=lambda k: FORMATS[k]["label"], key="image_format",
+    on_change=_apply_format_defaults,
+    help="16:9 for broadcast. The others are sized for social media; picking one starts from a "
+         "view width that suits its shape.",
+)
+FIG_WIDTH_IN, FIG_HEIGHT_IN = figure_size_in(image_format)
+# With the altitude locked to natural proportions, a tall frame cannot show a
+# wide view (the altitude would pass 90 degrees), so cap the width slider there.
+fov_max = max_fov_for_lock(image_format) if st.session_state["lock_proportions"] else FOV_RANGE[1]
+if st.session_state["fov_width"] > fov_max:
+    st.session_state["fov_width"] = fov_max
+fov_width = st.sidebar.slider("Field of View Width (deg)", FOV_RANGE[0], fov_max, step=FOV_STEP, key="fov_width")
 lock_proportions = st.sidebar.checkbox(
     "Lock altitude to natural proportions", key="lock_proportions",
-    help="Keeps the altitude shown matched to the width (at the graphic's 16:9 shape) so a "
+    help="Keeps the altitude shown matched to the width (at the chosen image shape) so a "
          "degree looks the same size sideways and upward -- trees, houses, and the Moon aren't "
          "stretched. Untick to set the altitude yourself.",
 )
 if lock_proportions:
     # Set before the slider below is created (Streamlit only allows that order).
-    st.session_state["alt_max"] = natural_altitude_for_fov(fov_width)
+    st.session_state["alt_max"] = natural_altitude_for_fov(fov_width, image_format)
 alt_max = st.sidebar.slider("Max Altitude Shown (deg)", ALT_MAX_RANGE[0], ALT_MAX_RANGE[1],
                             step=ALT_MAX_STEP, key="alt_max", disabled=lock_proportions)
 
@@ -519,6 +585,13 @@ show_asterisms = st.sidebar.checkbox(
 show_asterism_names = st.sidebar.checkbox("Show Asterism Names", value=False)
 show_altitude_gridlines = st.sidebar.checkbox("Show Altitude Gridlines", value=False)
 show_compass_lines = st.sidebar.checkbox("Show Compass Direction Lines", value=False)
+show_safe_zones = False
+if FORMATS[image_format]["safe_zone"]:
+    show_safe_zones = st.sidebar.checkbox(
+        "Show Social Safe Zones", value=False,
+        help="Marks, on screen only, where Stories/Reels/feed interfaces cover the image so labels and the "
+             "Moon can stay clear of them. The guide is not in the downloaded file.",
+    )
 
 # Persist the full view in the URL so a generated graphic is shareable/bookmarkable.
 st.query_params["lat"] = f"{lat:.2f}"
@@ -530,6 +603,7 @@ st.query_params["bearing"] = f"{bearing:.0f}"
 st.query_params["fov"] = f"{fov_width:.0f}"
 st.query_params["altmax"] = f"{alt_max:.0f}"
 st.query_params["lock"] = "1" if lock_proportions else "0"
+st.query_params["fmt"] = image_format
 st.query_params["turbidity"] = f"{turbidity:.1f}"
 st.query_params["brightness"] = f"{star_brightness:.1f}"
 st.query_params["leaves"] = foliage
@@ -691,6 +765,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                     )
                 cloud_rgba = cached_clouds(cloud_cover_grid, az_min, az_max, alt_max, sun_deg, sun_az_deg,
                                            turbidity, star_brightness, sky_rgb_linear, cloud_seed,
+                                           *cloud_grid_size(image_format),
                                            **moon_light, **moon_sky_kwargs)
                 ax.imshow(cloud_rgba, extent=[az_min, az_max, 0, alt_max], origin="lower", aspect="auto",
                           interpolation="bilinear", zorder=60)
@@ -1061,16 +1136,39 @@ if st.button("Generate Sky Graphic", type="primary"):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        # One PNG for both the screen and the download. The axes fill the figure,
-        # so no "tight" cropping: that, and st.pyplot's default 0.1" padding,
-        # added a transparent margin that showed up as a white border.
+        # The download is the exact PNG of the chosen format. The axes fill the
+        # figure, so no "tight" cropping (that, and st.pyplot's default 0.1"
+        # padding, added a transparent margin that showed up as a white border).
+        dpi = export_dpi(image_format)
         img_buf = io.BytesIO()
-        fig.savefig(img_buf, format="png", dpi=150, facecolor="none", edgecolor="none")
+        fig.savefig(img_buf, format="png", dpi=dpi, facecolor="none", edgecolor="none")
         img_buf.seek(0)
-        try:
-            st.image(img_buf.getvalue(), width="stretch")
-        except Exception:  # older Streamlit without width="stretch"
-            st.image(img_buf.getvalue(), use_container_width=True)
 
-        st.download_button(label="💾 Download High-Res PNG for Editing / On-Air", data=img_buf, file_name=f"custom_sky_{bearing:.0f}deg.png", mime="image/png")
+        # Safe-zone guides are for the screen only: drawn after the download
+        # image is saved, so they never appear in the file.
+        preview_bytes = img_buf.getvalue()
+        zone = FORMATS[image_format]["safe_zone"]
+        if show_safe_zones and zone:
+            def guide_band(x0, y0, width, height):
+                ax.add_patch(patches.Rectangle((x0, y0), width, height, transform=ax.transAxes,
+                                               facecolor="#ff3b3b", edgecolor="none", alpha=0.20, zorder=500))
+            guide_band(0.0, 1.0 - zone["top"], 1.0, zone["top"])
+            guide_band(0.0, 0.0, 1.0, zone["bottom"])
+            if zone["side"] > 0:
+                guide_band(0.0, 0.0, zone["side"], 1.0)
+                guide_band(1.0 - zone["side"], 0.0, zone["side"], 1.0)
+            preview = io.BytesIO()
+            fig.savefig(preview, format="png", dpi=dpi, facecolor="none", edgecolor="none")
+            preview_bytes = preview.getvalue()
+        try:
+            st.image(preview_bytes, width="stretch")
+        except Exception:  # older Streamlit without width="stretch"
+            st.image(preview_bytes, use_container_width=True)
+        if show_safe_zones and zone:
+            st.caption("Red bands mark where social apps cover the image with their own interface. "
+                       "They are a guide only and are not in the download.")
+
+        st.download_button(label="💾 Download High-Res PNG for Editing / On-Air", data=img_buf,
+                           file_name=f"custom_sky_{bearing:.0f}deg" + ("" if image_format == DEFAULT_FORMAT else f"_{image_format}") + ".png",
+                           mime="image/png")
         plt.close(fig)
