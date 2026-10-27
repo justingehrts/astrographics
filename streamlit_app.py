@@ -305,9 +305,33 @@ obs_time = st.sidebar.selectbox(
     index=default_time_index
 )
 
-tz_options = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"]
+tz_options = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+              "America/Phoenix", "America/Anchorage", "Pacific/Honolulu"]
 url_tz = st.query_params.get("tz", tz_options[0])
 selected_tz = st.sidebar.selectbox("Time Zone", tz_options, index=tz_options.index(url_tz) if url_tz in tz_options else 0)
+
+
+def describe_local_time(day, clock, tz_name):
+    """(label, warning) for a wall-clock time: the zone abbreviation and UTC offset
+    in effect on that date (EDT vs EST), plus a note when the time falls in the
+    hour skipped or repeated by a daylight-saving change."""
+    zone = ZoneInfo(tz_name)
+    first = datetime.combine(day, clock, tzinfo=zone)
+    label = f"{first.tzname()} (UTC{first.utcoffset().total_seconds() / 3600:+g})"
+    roundtrip = first.astimezone(ZoneInfo("UTC")).astimezone(zone)
+    if roundtrip.replace(tzinfo=None) != first.replace(tzinfo=None):
+        # Skipped hour (spring forward): the clock jumps over this time.
+        return label, f"{clock:%I:%M %p} does not exist today (clocks spring forward); using {roundtrip:%I:%M %p} {roundtrip.tzname()}."
+    if first.utcoffset() != first.replace(fold=1).utcoffset():
+        # Repeated hour (fall back): the earlier, daylight-time reading is used.
+        return label, f"{clock:%I:%M %p} happens twice today; using the first ({first.tzname()})."
+    return label, None
+
+
+_tz_label, _tz_warning = describe_local_time(obs_date, obs_time, selected_tz)
+st.sidebar.caption(f"Times are local: {_tz_label}")
+if _tz_warning:
+    st.sidebar.warning(_tz_warning)
 
 # ======================================================================
 # URL QUERY PARAMETER ENGINE
