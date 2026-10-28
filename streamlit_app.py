@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import matplotlib.patches as patches
 import matplotlib.patheffects as patheffects
+import matplotlib.font_manager
 import io
 import pathlib
 import numpy as np
@@ -684,6 +685,20 @@ LABEL_ZORDER = 110
 # Gridlines and compass lines sit above the clouds (60) and everything under
 # them, but below the horizon scene (100), which hides them like any distant object.
 OVERLAY_LINE_ZORDER, OVERLAY_TEXT_ZORDER = 70, 71
+# Label font: the station group's Proxima Nova (shipped in fonts/). Without the
+# files the labels fall back to matplotlib's default sans-serif at the same weight.
+FONT_DIR = pathlib.Path(__file__).parent / "fonts"
+FALLBACK_WEIGHTS = {"regular": "normal", "medium": "medium", "semibold": "semibold",
+                    "bold": "bold", "extrabold": "heavy"}
+
+
+def label_font(weight, size):
+    path = FONT_DIR / f"proximanova-{weight}.ttf"
+    if path.exists():
+        return matplotlib.font_manager.FontProperties(fname=str(path), size=size)
+    return matplotlib.font_manager.FontProperties(family="sans-serif", weight=FALLBACK_WEIGHTS[weight], size=size)
+
+
 LABEL_OUTLINE = [patheffects.withStroke(linewidth=2.5, foreground="#000000", alpha=0.55)]
 
 
@@ -941,7 +956,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                     # Below the Moon (zorder 49-50) so a lunar occultation hides the planet.
                     plot_point_sources(ax, body_az, body_alt, eff_mag, body_rgb, alpha, zorder=48)
                     if show_labels and body_alt > horizon_top_at(body_az):
-                        ax.text(body_az + 0.5, body_alt + 0.5, label, color="#ffffff", fontsize=10, weight='bold',
+                        ax.text(body_az + 0.5, body_alt + 0.5, label, color="#ffffff", fontproperties=label_font("bold", 10),
                                 path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
             except Exception:
                 logger.exception("Failed to compute/plot position for %s", label)
@@ -1017,7 +1032,7 @@ if st.button("Generate Sky Graphic", type="primary"):
 
                 # Labeled once at least its upper half clears the horizon silhouette.
                 if show_labels and moon_alt > horizon_top_at(moon_az):
-                    ax.text(moon_az + r_x + 0.4, moon_alt + 0.6, "Moon", color="#ffffff", fontsize=11, weight='bold',
+                    ax.text(moon_az + r_x + 0.4, moon_alt + 0.6, "Moon", color="#ffffff", fontproperties=label_font("bold", 11),
                             path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
         except Exception:
             logger.exception("Failed to compute/plot Moon position")
@@ -1077,13 +1092,13 @@ if st.button("Generate Sky Graphic", type="primary"):
             if show_major_star_labels:
                 for az_val, alt_val, hip_id in zip(label_az, label_alt, label_hips):
                     if hip_id in major_stars:
-                        ax.text(az_val + 0.4, alt_val + 0.4, major_stars[hip_id], color="#ffffff", fontsize=9, alpha=0.5,
+                        ax.text(az_val + 0.4, alt_val + 0.4, major_stars[hip_id], color="#ffffff", fontproperties=label_font("medium", 9), alpha=0.5,
                                 path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
             if show_minor_star_labels:
                 for az_val, alt_val, hip_id in zip(label_az, label_alt, label_hips):
                     if hip_id not in major_stars:
-                        ax.text(az_val + 0.4, alt_val + 0.4, f"HIP {hip_id}", color="#ffffff", fontsize=7, alpha=0.35,
+                        ax.text(az_val + 0.4, alt_val + 0.4, f"HIP {hip_id}", color="#ffffff", fontproperties=label_font("regular", 7), alpha=0.35,
                                 path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
         # --- CONSTELLATION STICK FIGURES AND ASTERISMS ---
@@ -1145,7 +1160,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                             name_az = float(np.mean([pt[0] for pt in drawn_points]))
                             name_alt = max(pt[1] for pt in drawn_points) + 1.5
                             if name_alt <= alt_max and name_alt > horizon_top_at(name_az):
-                                ax.text(name_az, name_alt, asterism["name"], color="#fde68a", fontsize=9,
+                                ax.text(name_az, name_alt, asterism["name"], color="#fde68a", fontproperties=label_font("semibold", 9),
                                         ha="center", va="bottom", alpha=0.85 * guide_fade,
                                         path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
@@ -1178,14 +1193,14 @@ if st.button("Generate Sky Graphic", type="primary"):
                 ax.axhline(alt_tick, color=grid_line_color, alpha=0.75, linestyle='--',
                            linewidth=1.1, path_effects=grid_outline, zorder=OVERLAY_LINE_ZORDER)
                 ax.text(az_min + 0.5, alt_tick + 0.3, f"{int(alt_tick)}°", color=grid_text_color,
-                        fontsize=9, alpha=0.95, path_effects=grid_outline, zorder=OVERLAY_TEXT_ZORDER)
+                        fontproperties=label_font("semibold", 9), alpha=0.95, path_effects=grid_outline, zorder=OVERLAY_TEXT_ZORDER)
 
         if show_compass_lines:
             for compass_az, compass_label in compass_ticks(az_min, az_max):
                 ax.axvline(compass_az, color=grid_line_color, alpha=0.75, linestyle='--',
                            linewidth=1.1, path_effects=grid_outline, zorder=OVERLAY_LINE_ZORDER)
                 ax.text(compass_az, alt_max - 1.5, compass_label, color=grid_text_color, ha='center',
-                        fontsize=9, alpha=0.95, path_effects=grid_outline, zorder=OVERLAY_TEXT_ZORDER)
+                        fontproperties=label_font("semibold", 9), alpha=0.95, path_effects=grid_outline, zorder=OVERLAY_TEXT_ZORDER)
 
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)
