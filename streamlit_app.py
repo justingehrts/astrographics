@@ -128,7 +128,9 @@ def open_hipparcos(loader, attempts=3):
 def get_astronomy_data():
     loader = Loader('.')
     ts = loader.timescale()
-    eph = loader('de421.bsp')
+    # The planetary ephemeris (JPL DE421) ships in data/; Skyfield only downloads
+    # it from NASA/JPL if that file is missing.
+    eph = Loader(str(pathlib.Path(__file__).parent / "data"))('de421.bsp')
 
     # Forces Streamlit Cloud to download the catalog natively if missing
     with open_hipparcos(loader) as f:
