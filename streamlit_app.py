@@ -11,6 +11,7 @@ from matplotlib.path import Path
 import matplotlib.patches as patches
 import matplotlib.patheffects as patheffects
 import io
+import pathlib
 import numpy as np
 
 # Core astronomical math engine
@@ -95,13 +96,20 @@ st.write("A lightweight, reliable engine rendering clean astronomical plates wit
 # Loads the heavy ephemeris and star catalog files into memory exactly once,
 # preventing timeouts and massive latency delays on cloud deployments.
 # ======================================================================
-HIPPARCOS_URLS = (hipparcos.URL, "https://cdsarc.u-strasbg.fr/ftp/cats/I/239/hip_main.dat")
+# The catalog ships with the repo (a gzipped copy of the ESA Hipparcos main
+# catalog, CDS I/239) so a cold start never depends on a download. The URLs are
+# only a fallback if that file is missing.
+HIPPARCOS_LOCAL = pathlib.Path(__file__).parent / "data" / "hip_main.dat.gz"
+HIPPARCOS_URLS = (hipparcos.URL, "https://vizier.cfa.harvard.edu/ftp/cats/I/239/hip_main.dat",
+                  "https://cdsarc.u-strasbg.fr/ftp/cats/I/239/hip_main.dat")
 
 
 def open_hipparcos(loader, attempts=3):
     """Open the Hipparcos catalog, downloading it if this container has no copy.
     The catalog host is occasionally unreachable, so try each known mirror a few
     times before giving up with a readable message (instead of a raw traceback)."""
+    if HIPPARCOS_LOCAL.exists():
+        return open(HIPPARCOS_LOCAL, "rb")
     last_error = None
     for url in HIPPARCOS_URLS:
         for attempt in range(attempts):
