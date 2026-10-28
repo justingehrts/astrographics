@@ -39,13 +39,13 @@ STANDARD_PRESSURE_MBAR = 1010.0
 # markers read alike) and is saved at the pixel size its platforms expect.
 FIGURE_AREA_IN2 = 81.0  # 12 x 6.75 in, the original 16:9 figure
 FORMATS = {
-    "16x9": dict(label="16:9 landscape (default)", aspect=(16, 9), export_px=(1920, 1080), default_fov=80.0,
+    "16x9": dict(label="16:9 landscape (default)", aspect=(16, 9), export_px=(1920, 1080), default_fov=80.0, text_scale=100,
                  safe_zone=None),
     "9x16": dict(label="9:16 vertical (Stories, Reels, TikTok, Shorts)", aspect=(9, 16), export_px=(1080, 1920),
-                 default_fov=45.0, safe_zone=dict(top=0.14, bottom=0.20, side=0.0)),
+                 default_fov=45.0, text_scale=160, safe_zone=dict(top=0.14, bottom=0.20, side=0.0)),
     "4x5": dict(label="4:5 portrait (Instagram, Facebook feed)", aspect=(4, 5), export_px=(1080, 1350),
-                default_fov=60.0, safe_zone=dict(top=0.05, bottom=0.05, side=0.05)),
-    "1x1": dict(label="1:1 square (any feed)", aspect=(1, 1), export_px=(1080, 1080), default_fov=70.0,
+                default_fov=60.0, text_scale=135, safe_zone=dict(top=0.05, bottom=0.05, side=0.05)),
+    "1x1": dict(label="1:1 square (any feed)", aspect=(1, 1), export_px=(1080, 1080), default_fov=70.0, text_scale=125,
                 safe_zone=None),
 }
 DEFAULT_FORMAT = "16x9"
@@ -53,6 +53,9 @@ ALT_MAX_RANGE = (20.0, 90.0)
 ALT_MAX_STEP = 5.0
 FOV_RANGE = (30.0, 180.0)
 FOV_STEP = 5.0
+TEXT_SCALE_RANGE = (50, 300)  # label size, percent
+TEXT_SCALE_STEP = 5
+TEXT_SCALE = 1.0  # label size multiplier; reassigned from the sidebar slider on each run
 
 
 def figure_size_in(fmt):
@@ -395,6 +398,10 @@ try:
 except ValueError:
     url_fov = FORMATS[url_fmt]["default_fov"]
 try:
+    url_txt = int(np.clip(float(st.query_params.get("txt", FORMATS[url_fmt]["text_scale"])), *TEXT_SCALE_RANGE))
+except ValueError:
+    url_txt = FORMATS[url_fmt]["text_scale"]
+try:
     url_altmax = np.clip(float(st.query_params.get("altmax", 45.0)), 20.0, 90.0)
 except ValueError:
     url_altmax = 45.0
@@ -435,11 +442,13 @@ _seed_session_state_once("fov_width", url_fov)
 _seed_session_state_once("alt_max", url_altmax)
 _seed_session_state_once("lock_proportions", url_lock)
 _seed_session_state_once("image_format", url_fmt)
+_seed_session_state_once("text_scale", url_txt)
 
 
 def _apply_format_defaults():
     """Picking a format starts from that format's natural view width."""
     st.session_state["fov_width"] = FORMATS[st.session_state["image_format"]]["default_fov"]
+    st.session_state["text_scale"] = FORMATS[st.session_state["image_format"]]["text_scale"]
 
 st.sidebar.selectbox(
     "Direction Preset", list(DIRECTION_PRESETS.keys()),
@@ -630,6 +639,12 @@ elif clouds_mode == "manual":
 # --- SIDEBAR: 4. LABELS & OVERLAYS ---
 st.sidebar.header("4. Labels & Overlays")
 
+text_scale = st.sidebar.slider(
+    "Label Size (%)", *TEXT_SCALE_RANGE, step=TEXT_SCALE_STEP, key="text_scale",
+    help="Scales every label (names, gridline and compass text). Picking an image format starts from a "
+         "size that suits it: portrait frames need larger text.",
+) / 100.0
+TEXT_SCALE = text_scale
 show_labels = st.sidebar.checkbox("Show Planet/Moon Labels", value=True)
 show_major_star_labels = st.sidebar.checkbox("Show Major Star Labels", value=True)
 show_minor_star_labels = st.sidebar.checkbox("Show Minor Star Labels", value=False)
@@ -662,6 +677,7 @@ st.query_params["fov"] = f"{fov_width:.0f}"
 st.query_params["altmax"] = f"{alt_max:.0f}"
 st.query_params["lock"] = "1" if lock_proportions else "0"
 st.query_params["fmt"] = image_format
+st.query_params["txt"] = f"{text_scale * 100:.0f}"
 st.query_params["turbidity"] = f"{turbidity:.1f}"
 st.query_params["brightness"] = f"{star_brightness:.1f}"
 st.query_params["leaves"] = foliage
@@ -695,11 +711,11 @@ FALLBACK_WEIGHTS = {"regular": "normal", "medium": "medium", "semibold": "semibo
 def label_font(weight, size):
     path = FONT_DIR / f"proximanova-{weight}.ttf"
     if path.exists():
-        return matplotlib.font_manager.FontProperties(fname=str(path), size=size)
-    return matplotlib.font_manager.FontProperties(family="sans-serif", weight=FALLBACK_WEIGHTS[weight], size=size)
+        return matplotlib.font_manager.FontProperties(fname=str(path), size=size * TEXT_SCALE)
+    return matplotlib.font_manager.FontProperties(family="sans-serif", weight=FALLBACK_WEIGHTS[weight], size=size * TEXT_SCALE)
 
 
-LABEL_OUTLINE = [patheffects.withStroke(linewidth=2.5, foreground="#000000", alpha=0.55)]
+LABEL_OUTLINE = [patheffects.withStroke(linewidth=2.5 * min(TEXT_SCALE, 2.0), foreground="#000000", alpha=0.55)]
 
 
 def disk_vertical_radius(r_x_deg, fov_width, alt_max):
@@ -853,7 +869,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             grid_line_color, grid_text_color, grid_stroke_color = "#1e293b", "#1e293b", "#ffffff"
         else:
             grid_line_color, grid_text_color, grid_stroke_color = "#e2e8f0", "#e2e8f0", "#0a0f18"
-        grid_outline = [patheffects.withStroke(linewidth=1.6, foreground=grid_stroke_color, alpha=0.9)]
+        grid_outline = [patheffects.withStroke(linewidth=1.6 * min(TEXT_SCALE, 2.0), foreground=grid_stroke_color, alpha=0.9)]
 
         # Faintest magnitude visible at each point in the sky. Twilight onset
         # stays anchored to the empirical sun-altitude table (the eye does
@@ -1199,7 +1215,7 @@ if st.button("Generate Sky Graphic", type="primary"):
             for compass_az, compass_label in compass_ticks(az_min, az_max):
                 ax.axvline(compass_az, color=grid_line_color, alpha=0.75, linestyle='--',
                            linewidth=1.1, path_effects=grid_outline, zorder=OVERLAY_LINE_ZORDER)
-                ax.text(compass_az, alt_max - 1.5, compass_label, color=grid_text_color, ha='center',
+                ax.text(compass_az, alt_max - 0.6, compass_label, color=grid_text_color, ha='center', va='top',
                         fontproperties=label_font("semibold", 9), alpha=0.95, path_effects=grid_outline, zorder=OVERLAY_TEXT_ZORDER)
 
         ax.get_xaxis().set_visible(False)
