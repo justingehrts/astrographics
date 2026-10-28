@@ -1,5 +1,6 @@
 # Skyfield ephemeris and star catalog data (downloaded on first run)
 *.bsp
+!data/de421.bsp
 hip_main.dat*
 !data/hip_main.dat.gz
 
