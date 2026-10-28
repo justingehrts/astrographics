@@ -1,6 +1,7 @@
 # Skyfield ephemeris and star catalog data (downloaded on first run)
 *.bsp
 hip_main.dat*
+!data/hip_main.dat.gz
 
 # Python
 __pycache__/
