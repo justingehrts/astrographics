@@ -1,4 +1,5 @@
 import logging
+import time as time_module
 import streamlit as st
 import streamlit.components.v1 as components
 from datetime import datetime, time
@@ -94,6 +95,27 @@ st.write("A lightweight, reliable engine rendering clean astronomical plates wit
 # Loads the heavy ephemeris and star catalog files into memory exactly once,
 # preventing timeouts and massive latency delays on cloud deployments.
 # ======================================================================
+HIPPARCOS_URLS = (hipparcos.URL, "https://cdsarc.u-strasbg.fr/ftp/cats/I/239/hip_main.dat")
+
+
+def open_hipparcos(loader, attempts=3):
+    """Open the Hipparcos catalog, downloading it if this container has no copy.
+    The catalog host is occasionally unreachable, so try each known mirror a few
+    times before giving up with a readable message (instead of a raw traceback)."""
+    last_error = None
+    for url in HIPPARCOS_URLS:
+        for attempt in range(attempts):
+            try:
+                return loader.open(url, filename="hip_main.dat")
+            except OSError as exc:
+                last_error = exc
+                time_module.sleep(1.5 * (attempt + 1))
+    st.error("The star catalog could not be downloaded (its server may be down). "
+             "Please try again in a few minutes.")
+    st.caption(f"Last error: {last_error}")
+    st.stop()
+
+
 @st.cache_resource
 def get_astronomy_data():
     loader = Loader('.')
@@ -101,7 +123,7 @@ def get_astronomy_data():
     eph = loader('de421.bsp')
 
     # Forces Streamlit Cloud to download the catalog natively if missing
-    with loader.open(hipparcos.URL) as f:
+    with open_hipparcos(loader) as f:
         stars_df = hipparcos.load_dataframe(f)
         bv = stars.load_bv_series(f)
 
