@@ -55,6 +55,13 @@ FOV_RANGE = (30.0, 180.0)
 FOV_STEP = 5.0
 TEXT_SCALE_RANGE = (50, 300)  # label size, percent
 TEXT_SCALE_STEP = 5
+# Major anchor stars (Hipparcos ID -> common name) that get a name label.
+MAJOR_STARS = {
+    32349: "Sirius", 24608: "Capella", 69673: "Arcturus", 91262: "Vega",
+    24436: "Rigel", 37279: "Procyon", 27989: "Betelgeuse", 97649: "Altair",
+    21421: "Aldebaran", 65474: "Spica", 80763: "Antares", 37826: "Pollux",
+    102098: "Deneb", 49669: "Regulus", 36850: "Castor", 11767: "Polaris",
+}
 TEXT_SCALE = 1.0  # label size multiplier; reassigned from the sidebar slider on each run
 
 
@@ -158,8 +165,8 @@ def get_astronomy_data():
 
 
 @st.cache_resource
-def get_constellation_segments():
-    return constellations.load_constellation_segments()
+def get_constellations():
+    return constellations.load_constellations()
 
 
 @st.cache_resource
@@ -259,7 +266,7 @@ def cached_clouds(cover_grid, az_min, az_max, alt_max, sun_alt, sun_az, turbidit
 
 # Load the data models natively
 ts, eph, stars_df = get_astronomy_data()
-CONSTELLATION_SEGMENTS = get_constellation_segments()
+CONSTELLATIONS = get_constellations()
 earth = eph['earth']
 sun = eph['sun']
 
@@ -649,6 +656,10 @@ show_labels = st.sidebar.checkbox("Show Planet/Moon Labels", value=True)
 show_major_star_labels = st.sidebar.checkbox("Show Major Star Labels", value=True)
 show_minor_star_labels = st.sidebar.checkbox("Show Minor Star Labels", value=False)
 show_constellations = st.sidebar.checkbox("Show Constellation Lines", value=True)
+show_constellation_names = st.sidebar.checkbox(
+    "Show Constellation Names", value=False,
+    help="Names each constellation figure that is mostly in view. Needs Constellation Lines on.",
+)
 show_asterisms = st.sidebar.checkbox(
     "Show Asterisms", value=False,
     help="Familiar patterns that cross constellations or get lost inside a full figure: Big Dipper "
@@ -1093,27 +1104,19 @@ if st.button("Generate Sky Graphic", type="primary"):
             plot_point_sources(ax, plot_az, plot_alt, star_eff_mag[viewport_mask], plot_rgb,
                                star_alpha[viewport_mask], zorder=20)
 
-            # Dictionary of major anchor stars (Hipparcos ID -> Common Name)
-            major_stars = {
-                32349: "Sirius", 24608: "Capella", 69673: "Arcturus", 91262: "Vega",
-                24436: "Rigel", 37279: "Procyon", 27989: "Betelgeuse", 97649: "Altair",
-                21421: "Aldebaran", 65474: "Spica", 80763: "Antares", 37826: "Pollux",
-                102098: "Deneb", 49669: "Regulus", 36850: "Castor", 11767: "Polaris"
-            }
-
             # Only label stars that aren't hidden behind the horizon silhouette.
             unobstructed = plot_alt > horizon_top_at(plot_az)
             label_az, label_alt, label_hips = plot_az[unobstructed], plot_alt[unobstructed], plot_hips[unobstructed]
 
             if show_major_star_labels:
                 for az_val, alt_val, hip_id in zip(label_az, label_alt, label_hips):
-                    if hip_id in major_stars:
-                        ax.text(az_val + 0.4, alt_val + 0.4, major_stars[hip_id], color="#ffffff", fontproperties=label_font("medium", 9), alpha=0.5,
+                    if hip_id in MAJOR_STARS:
+                        ax.text(az_val + 0.4, alt_val + 0.4, MAJOR_STARS[hip_id], color="#ffffff", fontproperties=label_font("medium", 9), alpha=0.5,
                                 path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
             if show_minor_star_labels:
                 for az_val, alt_val, hip_id in zip(label_az, label_alt, label_hips):
-                    if hip_id not in major_stars:
+                    if hip_id not in MAJOR_STARS:
                         ax.text(az_val + 0.4, alt_val + 0.4, f"HIP {hip_id}", color="#ffffff", fontproperties=label_font("regular", 7), alpha=0.35,
                                 path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
@@ -1129,7 +1132,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                 guide_fade = 0.3 + 0.7 * float(np.clip((-6.0 - sun_deg) / 4.0, 0.0, 1.0))
                 wanted_hips = set()
                 if show_constellations:
-                    wanted_hips |= {hip for pair in CONSTELLATION_SEGMENTS for hip in pair}
+                    wanted_hips |= {hip for segments in CONSTELLATIONS.values() for pair in segments for hip in pair}
                 if show_asterisms:
                     wanted_hips |= asterisms.all_hips()
                 seg_stars = stars_df.loc[stars_df.index.intersection(sorted(wanted_hips))]
@@ -1150,14 +1153,26 @@ if st.button("Generate Sky Graphic", type="primary"):
 
                 anchored = set()
                 if show_constellations:
-                    for hip_a, hip_b in CONSTELLATION_SEGMENTS:
-                        pair = visible_pair(hip_a, hip_b)
-                        if pair is None:
-                            continue
-                        (az_a, alt_a), (az_b, alt_b) = pair
-                        ax.plot([az_a, az_b], [alt_a, alt_b], color="#7dd3fc", alpha=0.35 * guide_fade,
-                                linewidth=0.8, zorder=15)
-                        anchored.update((hip_a, hip_b))
+                    for const_name, const_segments in CONSTELLATIONS.items():
+                        drawn_points, drawn_count = [], 0
+                        for hip_a, hip_b in const_segments:
+                            pair = visible_pair(hip_a, hip_b)
+                            if pair is None:
+                                continue
+                            (az_a, alt_a), (az_b, alt_b) = pair
+                            ax.plot([az_a, az_b], [alt_a, alt_b], color="#7dd3fc", alpha=0.35 * guide_fade,
+                                    linewidth=0.8, zorder=15)
+                            anchored.update((hip_a, hip_b))
+                            drawn_points += [(az_a, alt_a), (az_b, alt_b)]
+                            drawn_count += 1
+                        # Named once at least two of its lines are fully in view.
+                        if show_constellation_names and drawn_count >= 2:
+                            name_az = float(np.mean([pt[0] for pt in drawn_points]))
+                            name_alt = max(pt[1] for pt in drawn_points) + 1.5
+                            if name_alt <= alt_max and name_alt > horizon_top_at(name_az):
+                                ax.text(name_az, name_alt, const_name, color="#bae6fd",
+                                        fontproperties=label_font("semibold", 9), ha="center", va="bottom",
+                                        alpha=0.85 * guide_fade, path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
                 if show_asterisms:
                     for asterism in asterisms.ASTERISMS:
@@ -1193,6 +1208,14 @@ if st.button("Generate Sky Graphic", type="primary"):
                     g_rgb = stars.bv_to_rgb(g_stars['bv'].values) * extinction.color_tint(g_alt, turbidity)
                     plot_point_sources(ax, g_az, g_alt, g_mag, g_rgb,
                                        np.full(len(guide), 0.7 * guide_fade), zorder=19)
+                    # A named star drawn only as a figure vertex (twilight or the
+                    # visibility limit hid it from the regular pass) still gets its name.
+                    if show_major_star_labels:
+                        for hip_id, az_val, alt_val in zip(guide, g_az, g_alt):
+                            if hip_id in MAJOR_STARS and alt_val > horizon_top_at(az_val):
+                                ax.text(az_val + 0.4, alt_val + 0.4, MAJOR_STARS[hip_id], color="#ffffff",
+                                        fontproperties=label_font("medium", 9), alpha=0.5 * guide_fade,
+                                        path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
             except Exception:
                 logger.exception("Failed to draw constellation lines/asterisms")
 
