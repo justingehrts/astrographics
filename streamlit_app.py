@@ -20,7 +20,7 @@ from skyfield.api import wgs84, Star, Loader
 from skyfield.data import hipparcos
 from skyfield.magnitudelib import planetary_magnitude
 
-from astro import asterisms, atmosphere, clouds, constellations, extinction, horizon, location, moon, stars, treeline
+from astro import asterisms, atmosphere, clouds, constellations, extinction, horizon, labelplace, location, moon, stars, treeline
 
 logger = logging.getLogger(__name__)
 
@@ -1152,6 +1152,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                     return (pa, pb) if pa is not None and pb is not None and seg_in_view(pa) and seg_in_view(pb) else None
 
                 anchored = set()
+                asterism_names, constellation_names = [], []  # placed once every line is drawn
                 if show_constellations:
                     for const_name, const_segments in CONSTELLATIONS.items():
                         drawn_points, drawn_count = [], 0
@@ -1170,9 +1171,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                             name_az = float(np.mean([pt[0] for pt in drawn_points]))
                             name_alt = max(pt[1] for pt in drawn_points) + 1.5
                             if name_alt <= alt_max and name_alt > horizon_top_at(name_az):
-                                ax.text(name_az, name_alt, const_name, color="#bae6fd",
-                                        fontproperties=label_font("semibold", 9), ha="center", va="bottom",
-                                        alpha=0.85 * guide_fade, path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
+                                constellation_names.append((name_az, name_alt, const_name))
 
                 if show_asterisms:
                     for asterism in asterisms.ASTERISMS:
@@ -1191,9 +1190,19 @@ if st.button("Generate Sky Graphic", type="primary"):
                             name_az = float(np.mean([pt[0] for pt in drawn_points]))
                             name_alt = max(pt[1] for pt in drawn_points) + 1.5
                             if name_alt <= alt_max and name_alt > horizon_top_at(name_az):
-                                ax.text(name_az, name_alt, asterism["name"], color="#fde68a", fontproperties=label_font("semibold", 9),
-                                        ha="center", va="bottom", alpha=0.85 * guide_fade,
-                                        path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
+                                asterism_names.append((name_az, name_alt, asterism["name"]))
+
+                # Names go on last, each nudged clear of the lines and of the labels
+                # already placed (asterisms first: they are the more specific names).
+                if asterism_names or constellation_names:
+                    renderer = fig.canvas.get_renderer()
+                    for names, color in ((asterism_names, "#fde68a"), (constellation_names, "#bae6fd")):
+                        for name_az, name_alt, name in names:
+                            name_text = ax.text(name_az, name_alt, name, color=color,
+                                                fontproperties=label_font("semibold", 9), ha="center", va="bottom",
+                                                alpha=0.85 * guide_fade, path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
+                            labelplace.place_clear(ax, renderer, name_text,
+                                                   lambda az, alt: alt > horizon_top_at(az))
 
                 # Guide stars at the figures' vertices, except those the regular
                 # star pass above already drew at their true brightness.
