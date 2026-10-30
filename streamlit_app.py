@@ -20,7 +20,7 @@ from skyfield.api import wgs84, Star, Loader
 from skyfield.data import hipparcos
 from skyfield.magnitudelib import planetary_magnitude
 
-from astro import asterisms, atmosphere, clouds, constellations, extinction, horizon, labelplace, location, moon, stars, treeline
+from astro import asterisms, atmosphere, clouds, constellations, extinction, geocode, horizon, labelplace, location, moon, stars, treeline
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +316,85 @@ def compass_ticks(az_min, az_max):
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("1. Observation Settings")
 
+# --- LOCATION: type a city, or use coordinates ---
+try:
+    url_lat = np.clip(float(st.query_params.get("lat", 39.96)), -90.0, 90.0)
+except ValueError:
+    url_lat = 39.96
+try:
+    url_lon = np.clip(float(st.query_params.get("lon", -83.00)), -180.0, 180.0)
+except ValueError:
+    url_lon = -83.00
+_url_place = st.query_params.get("place")
+if _url_place is None:  # a fresh visit shows the default city; an old coordinates-only link shows none
+    _url_place = "Columbus, OH" if "lat" not in st.query_params and "lon" not in st.query_params else ""
+_seed_session_state_once("lat_input", float(url_lat))
+_seed_session_state_once("lon_input", float(url_lon))
+_seed_session_state_once("place_query", _url_place)
+_seed_session_state_once("place_label", _url_place)
+_seed_session_state_once("place_coords", (round(float(url_lat), 2), round(float(url_lon), 2)))
+
+TZ_OPTIONS = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+              "America/Phoenix", "America/Anchorage", "Pacific/Honolulu"]
+_url_tz = st.query_params.get("tz", TZ_OPTIONS[0])
+_seed_session_state_once("tz_select", _url_tz if _url_tz in TZ_OPTIONS else TZ_OPTIONS[0])
+
+
+def _apply_place(place):
+    """Point the location (and time zone, when known) at a geocoded place."""
+    st.session_state["lat_input"] = round(place["lat"], 2)
+    st.session_state["lon_input"] = round(place["lon"], 2)
+    st.session_state["place_label"] = place["label"]
+    st.session_state["place_coords"] = (st.session_state["lat_input"], st.session_state["lon_input"])
+    if place["timezone"] in TZ_OPTIONS:
+        st.session_state["tz_select"] = place["timezone"]
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _cached_place_search(text):
+    return geocode.search_places(text)
+
+
+def _search_place():
+    text = st.session_state["place_query"].strip()
+    st.session_state["place_matches"] = []
+    st.session_state["place_message"] = ""
+    if not text:
+        return
+    matches = _cached_place_search(text)
+    if not matches:
+        st.session_state["place_message"] = "No match found. Try \"City, ST\" or enter coordinates below."
+        return
+    st.session_state["place_matches"] = matches[:6]
+    st.session_state["place_choice"] = 0
+    _apply_place(matches[0])
+
+
+def _choose_place():
+    matches = st.session_state.get("place_matches", [])
+    choice = st.session_state.get("place_choice", 0)
+    if 0 <= choice < len(matches):
+        _apply_place(matches[choice])
+
+
+st.sidebar.text_input(
+    "City, State", key="place_query", on_change=_search_place, placeholder="e.g. Columbus, OH",
+    help="Type a city and state and press Enter. The coordinates and time zone are filled in for you.",
+)
+_matches = st.session_state.get("place_matches", [])
+if len(_matches) > 1:
+    st.sidebar.selectbox(
+        "Other matches", range(len(_matches)), key="place_choice", on_change=_choose_place,
+        format_func=lambda i: _matches[i]["label"] + (f" (pop. {_matches[i]['population']:,})" if _matches[i]["population"] else ""),
+        help="The largest match is used first; pick another if that is not the one you meant.",
+    )
+if st.session_state.get("place_message"):
+    st.sidebar.caption(st.session_state["place_message"])
+with st.sidebar.expander("Or enter latitude / longitude"):
+    st.number_input("Latitude", step=0.01, format="%.2f", min_value=-90.0, max_value=90.0, key="lat_input")
+    st.number_input("Longitude", step=0.01, format="%.2f", min_value=-180.0, max_value=180.0, key="lon_input")
+st.sidebar.caption(f"📍 {st.session_state['lat_input']:.2f}, {st.session_state['lon_input']:.2f}")
+
 try:
     url_date = datetime.strptime(st.query_params.get("date", ""), "%Y-%m-%d").date()
 except ValueError:
@@ -348,10 +427,7 @@ obs_time = st.sidebar.selectbox(
     index=default_time_index
 )
 
-tz_options = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
-              "America/Phoenix", "America/Anchorage", "Pacific/Honolulu"]
-url_tz = st.query_params.get("tz", tz_options[0])
-selected_tz = st.sidebar.selectbox("Time Zone", tz_options, index=tz_options.index(url_tz) if url_tz in tz_options else 0)
+selected_tz = st.sidebar.selectbox("Time Zone", TZ_OPTIONS, key="tz_select")
 
 
 def describe_local_time(day, clock, tz_name):
@@ -379,18 +455,8 @@ if _tz_warning:
 # ======================================================================
 # URL QUERY PARAMETER ENGINE
 # ======================================================================
-try:
-    url_lat = np.clip(float(st.query_params.get("lat", 39.96)), -90.0, 90.0)
-except ValueError:
-    url_lat = 39.96
-
-try:
-    url_lon = np.clip(float(st.query_params.get("lon", -83.00)), -180.0, 180.0)
-except ValueError:
-    url_lon = -83.00
-
-lat = st.sidebar.number_input("Latitude", value=url_lat, step=0.01, format="%.2f", min_value=-90.0, max_value=90.0)
-lon = st.sidebar.number_input("Longitude", value=url_lon, step=0.01, format="%.2f", min_value=-180.0, max_value=180.0)
+lat = st.session_state["lat_input"]
+lon = st.session_state["lon_input"]
 
 st.sidebar.header("2. View Window")
 
@@ -680,6 +746,9 @@ if FORMATS[image_format]["safe_zone"]:
 # Persist the full view in the URL so a generated graphic is shareable/bookmarkable.
 st.query_params["lat"] = f"{lat:.2f}"
 st.query_params["lon"] = f"{lon:.2f}"
+# The place name is only shared while the coordinates still match it (editing lat/lon drops it).
+st.query_params["place"] = (st.session_state["place_label"]
+                            if st.session_state["place_coords"] == (round(lat, 2), round(lon, 2)) else "")
 st.query_params["date"] = obs_date.isoformat()
 st.query_params["time"] = obs_time.strftime("%H:%M")
 st.query_params["tz"] = selected_tz
