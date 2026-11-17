@@ -337,7 +337,7 @@ _seed_session_state_once("place_coords", (round(float(url_lat), 2), round(float(
 TZ_OPTIONS = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
               "America/Phoenix", "America/Anchorage", "Pacific/Honolulu"]
 _url_tz = st.query_params.get("tz", TZ_OPTIONS[0])
-_seed_session_state_once("tz_select", _url_tz if _url_tz in TZ_OPTIONS else TZ_OPTIONS[0])
+_seed_session_state_once("tz_select", geocode.matching_zone(_url_tz, TZ_OPTIONS) or TZ_OPTIONS[0])
 
 
 def _apply_place(place):
@@ -346,8 +346,12 @@ def _apply_place(place):
     st.session_state["lon_input"] = round(place["lon"], 2)
     st.session_state["place_label"] = place["label"]
     st.session_state["place_coords"] = (st.session_state["lat_input"], st.session_state["lon_input"])
-    if place["timezone"] in TZ_OPTIONS:
-        st.session_state["tz_select"] = place["timezone"]
+    zone = geocode.matching_zone(place["timezone"], TZ_OPTIONS)
+    if zone:
+        st.session_state["tz_select"] = zone
+        st.session_state["place_message"] = ""
+    else:
+        st.session_state["place_message"] = "Couldn't set the time zone for this place. Please check it below."
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)

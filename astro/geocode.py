@@ -9,6 +9,8 @@ Everything fails soft: errors become an empty result list.
 """
 import logging
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -60,6 +62,34 @@ def parse_query(text):
         if len(words) > n and (state := _state_name(" ".join(words[-n:]))):
             return " ".join(words[:-n]), state
     return text, None
+
+
+def matching_zone(zone, options, year=None):
+    """The zone in `options` that keeps the same clock time as `zone` all year, else None.
+
+    Geocoders return precise zone names (America/Detroit, America/Boise, America/Juneau)
+    that the app's short dropdown doesn't list; this maps them to the listed zone with the
+    same UTC offset in both winter and summer, so daylight saving time lines up too
+    (Boise -> Denver, not Phoenix)."""
+    if not zone:
+        return None
+    if zone in options:
+        return zone
+    try:
+        tz = ZoneInfo(zone)
+    except Exception:
+        return None
+    year = year or datetime.now().year
+    dates = [datetime(year, 1, 15, 12), datetime(year, 7, 15, 12)]
+
+    def offsets(z):
+        return [d.replace(tzinfo=z).utcoffset() for d in dates]
+
+    target = offsets(tz)
+    for option in options:
+        if offsets(ZoneInfo(option)) == target:
+            return option
+    return None
 
 
 def _label(name, state, country_code):
