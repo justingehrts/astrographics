@@ -20,7 +20,7 @@ from skyfield.api import wgs84, Star, Loader
 from skyfield.data import hipparcos
 from skyfield.magnitudelib import planetary_magnitude
 
-from astro import asterisms, atmosphere, clouds, constellations, extinction, geocode, horizon, labelplace, location, moon, stars, treeline
+from astro import asterisms, atmosphere, clouds, constellations, extinction, geocode, highlights, horizon, labelplace, location, moon, stars, treeline
 
 logger = logging.getLogger(__name__)
 
@@ -465,15 +465,22 @@ st.sidebar.html(
     " { font-size: 0.8rem; padding-left: 0.2rem; padding-right: 0.2rem; white-space: nowrap; }"
     "</style>"
 )
+def _full_width_button(container, label, **kwargs):
+    try:
+        return container.button(label, width="stretch", **kwargs)
+    except Exception:  # older Streamlit without width="stretch"
+        return container.button(label, use_container_width=True, **kwargs)
+
+
 _step_cols = st.sidebar.columns(4)
 for _col, (_label, _minutes, _help) in zip(_step_cols, [
     ("−1h", -60, "Back 1 hour"), ("−15m", -15, "Back 15 minutes"),
     ("+15m", 15, "Forward 15 minutes"), ("+1h", 60, "Forward 1 hour"),
 ]):
-    try:
-        _col.button(_label, key=f"step_{_minutes}", help=_help, on_click=_step_time, args=(_minutes,), width="stretch")
-    except Exception:  # older Streamlit without width="stretch"
-        _col.button(_label, key=f"step_{_minutes}", help=_help, on_click=_step_time, args=(_minutes,), use_container_width=True)
+    _full_width_button(_col, _label, key=f"step_{_minutes}", help=_help, on_click=_step_time, args=(_minutes,))
+
+# Filled in below, once the sky-condition sliders it depends on exist.
+_highlights_slot = st.sidebar.container()
 
 selected_tz = st.sidebar.selectbox("Time Zone", TZ_OPTIONS, key="tz_select", format_func=TZ_LABELS.get)
 
@@ -648,6 +655,58 @@ _seed_session_state_once("star_brightness", location.SUBURBAN_DEFAULT[1])
 
 turbidity = st.sidebar.slider("Atmospheric Haze (Turbidity)", 1.0, 5.0, step=0.5, key="turbidity")
 star_brightness = st.sidebar.slider("Star Visibility Limit", 1.0, 4.5, step=0.5, key="star_brightness")
+
+
+# --- HIGHLIGHTS: clickable list under the time controls ---
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_highlights(lat_, lon_, day_iso, tz_name, turbidity_):
+    day_ = datetime.strptime(day_iso, "%Y-%m-%d").date()
+    return highlights.find_highlights(ts, eph, lat_, lon_, day_, tz_name, turbidity_,
+                                      STANDARD_TEMPERATURE_C, STANDARD_PRESSURE_MBAR)
+
+
+def _jump_to_highlight(h):
+    """Set the time and aim the view so the object is centered horizontally. If it would
+    sit above the top of the frame, widen the view (altitude locked) or raise the altitude
+    limit (unlocked) just enough to include it."""
+    st.session_state["obs_time"] = h.when
+    st.session_state["bearing"] = float(int(round(h.az_deg)) % 360)
+    st.session_state["direction_preset"] = "Custom"
+    st.session_state.pop("_highlight_note", None)
+    need = h.alt_deg + 5.0  # leave a little sky above the object
+    if st.session_state["lock_proportions"]:
+        fmt, fov = st.session_state["image_format"], st.session_state["fov_width"]
+        while natural_altitude_for_fov(fov, fmt) < need and fov + FOV_STEP <= max_fov_for_lock(fmt):
+            fov += FOV_STEP
+        if fov != st.session_state["fov_width"]:
+            st.session_state["fov_width"] = fov
+            st.session_state["_highlight_note"] = (f"Widened the view to {fov:.0f}° to fit {h.name} ({h.alt_deg:.0f}° up).", "fov_width", fov)
+    elif need > st.session_state["alt_max"]:
+        raised = float(min(ALT_MAX_RANGE[1], np.ceil(need / ALT_MAX_STEP) * ALT_MAX_STEP))
+        st.session_state["alt_max"] = raised
+        st.session_state["_highlight_note"] = (f"Raised the max altitude to {raised:.0f}° to fit {h.name} ({h.alt_deg:.0f}° up).", "alt_max", raised)
+
+
+with _highlights_slot:
+    st.markdown("**Highlights for this date**")
+    try:
+        _highlights = cached_highlights(round(lat, 2), round(lon, 2), obs_date.isoformat(), selected_tz, float(turbidity))
+    except Exception:
+        logger.exception("Could not work out the highlights")
+        _highlights = []
+        st.caption("Highlights are unavailable right now.")
+    else:
+        if not _highlights:
+            st.caption("No planet or Moon is clearly visible at least 10° up in the dark on this date.")
+        else:
+            st.caption("Planets and the Moon at least 10° up in a dark sky. Click one to jump to its best time and aim at it.")
+    for _h in _highlights:
+        _name = f"{_h.name}, {_h.detail}" if _h.detail else _h.name
+        _full_width_button(st, f"{_name} · {_h.when:%I:%M %p}"+ f" · {_h.direction} · {_h.alt_deg:.0f}° up",
+                           key=f"hl_{_h.name}", on_click=_jump_to_highlight, args=(_h,))
+    _note = st.session_state.get("_highlight_note")
+    if _note and st.session_state.get(_note[1]) == _note[2]:
+        st.caption(_note[0])
 
 sky_conditions = {
     1.0: "🏙️ Heavy City Light Pollution (Only exceptionally bright anchor stars appear)",
