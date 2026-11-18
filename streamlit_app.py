@@ -1071,8 +1071,9 @@ if st.button("Generate Sky Graphic", type="primary"):
                     # Below the Moon (zorder 49-50) so a lunar occultation hides the planet.
                     plot_point_sources(ax, body_az, body_alt, eff_mag, body_rgb, alpha, zorder=48)
                     if show_labels and body_alt > horizon_top_at(body_az):
-                        ax.text(body_az + 0.5, body_alt + 0.5, label, color="#ffffff", fontproperties=label_font("bold", 10),
-                                path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
+                        labelplace.text_beside(ax, fig.canvas.get_renderer(), body_az, body_alt + 0.5, label, 0.5, 0.5,
+                                               color="#ffffff", fontproperties=label_font("bold", 10),
+                                               path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
             except Exception:
                 logger.exception("Failed to compute/plot position for %s", label)
                 continue
@@ -1147,8 +1148,9 @@ if st.button("Generate Sky Graphic", type="primary"):
 
                 # Labeled once at least its upper half clears the horizon silhouette.
                 if show_labels and moon_alt > horizon_top_at(moon_az):
-                    ax.text(moon_az + r_x + 0.4, moon_alt + 0.6, "Moon", color="#ffffff", fontproperties=label_font("bold", 11),
-                            path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
+                    labelplace.text_beside(ax, fig.canvas.get_renderer(), moon_az, moon_alt + 0.6, "Moon", r_x + 0.4, r_x + 0.4,
+                                           color="#ffffff", fontproperties=label_font("bold", 11),
+                                           path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
         except Exception:
             logger.exception("Failed to compute/plot Moon position")
 

@@ -66,3 +66,17 @@ def place_clear(ax, renderer, text, above_horizon):
                 return text
     text.set_position(best)
     return text
+
+
+def text_beside(ax, renderer, x, y, s, gap_right, gap_left, **kwargs):
+    """Label an object at data position (x, y): on its right by default, on its
+    left when the right-hand label would run past the frame edge.
+
+    `gap_right` / `gap_left` are the data-unit gaps from x to the label's near edge on each
+    side (the Moon passes its disk radius plus a margin). Extra keyword arguments go to
+    ax.text. Returns the artist."""
+    text = ax.text(x + gap_right, y, s, ha="left", **kwargs)
+    if text.get_window_extent(renderer).x1 > ax.bbox.x1 - _PAD_PX:
+        text.set_ha("right")
+        text.set_position((x - gap_left, y))
+    return text
