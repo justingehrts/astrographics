@@ -7,6 +7,7 @@ any export resolution (the whole figure scales together)."""
 import numpy as np
 
 _PAD_PX = 3.0          # clear space kept around a label
+_EDGE_ZONE = 0.25      # only labels this close (fraction of the frame width) to the right edge are measured
 _LINE_STEP_PX = 3.0    # spacing of the sample points along each line
 _ALT_OFFSETS_DEG = (0.0, 1.5, 3.0, -1.5, -3.0, 4.5, 6.0)
 _AZ_OFFSETS_WIDTHS = (0.0, -0.6, 0.6, -1.1, 1.1, -1.7, 1.7)  # in label widths
@@ -65,4 +66,21 @@ def place_clear(ax, renderer, text, above_horizon):
                 text.set_position(best)
                 return text
     text.set_position(best)
+    return text
+
+
+def text_beside(ax, renderer, x, y, s, gap_right, gap_left, **kwargs):
+    """Label an object at data position (x, y): on its right by default, on its
+    left when the right-hand label would run past the frame edge.
+
+    `gap_right` / `gap_left` are the data-unit gaps from x to the label's near edge on each
+    side (the Moon passes its disk radius plus a margin). Extra keyword arguments go to
+    ax.text. Returns the artist."""
+    text = ax.text(x + gap_right, y, s, ha="left", **kwargs)
+    left, right = ax.get_xlim()
+    if right - x > _EDGE_ZONE * abs(right - left):  # nowhere near the edge: skip the measuring
+        return text
+    if text.get_window_extent(renderer).x1 > ax.bbox.x1 - _PAD_PX:
+        text.set_ha("right")
+        text.set_position((x - gap_left, y))
     return text
