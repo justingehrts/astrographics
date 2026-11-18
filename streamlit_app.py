@@ -458,10 +458,17 @@ def _step_time(minutes):
     st.session_state["obs_time"] = moved.time()
 
 
+# Smaller type and tighter padding so "−15m" fits in a quarter of the sidebar.
+st.sidebar.html(
+    "<style>"
+    ".st-key-step_-60 button, .st-key-step_-15 button, .st-key-step_15 button, .st-key-step_60 button"
+    " { font-size: 0.8rem; padding-left: 0.2rem; padding-right: 0.2rem; white-space: nowrap; }"
+    "</style>"
+)
 _step_cols = st.sidebar.columns(4)
 for _col, (_label, _minutes, _help) in zip(_step_cols, [
-    ("−1h", -60, "Back 1 hour"), ("−15", -15, "Back 15 minutes"),
-    ("+15", 15, "Forward 15 minutes"), ("+1h", 60, "Forward 1 hour"),
+    ("−1h", -60, "Back 1 hour"), ("−15m", -15, "Back 15 minutes"),
+    ("+15m", 15, "Forward 15 minutes"), ("+1h", 60, "Forward 1 hour"),
 ]):
     try:
         _col.button(_label, key=f"step_{_minutes}", help=_help, on_click=_step_time, args=(_minutes,), width="stretch")
