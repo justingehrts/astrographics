@@ -906,6 +906,7 @@ if st.button("Generate Sky Graphic", type="primary"):
         ax.set_position([0, 0, 1, 1])  # full-bleed: no default subplot margins around the sky
         ax.set_xlim(az_min, az_max)
         ax.set_ylim(0, alt_max)
+        label_renderer = fig.canvas.get_renderer()  # measures labels so edge ones can flip left
 
         # ======================================================================
         # SECTION 3: SKY BACKGROUND
@@ -1071,7 +1072,7 @@ if st.button("Generate Sky Graphic", type="primary"):
                     # Below the Moon (zorder 49-50) so a lunar occultation hides the planet.
                     plot_point_sources(ax, body_az, body_alt, eff_mag, body_rgb, alpha, zorder=48)
                     if show_labels and body_alt > horizon_top_at(body_az):
-                        labelplace.text_beside(ax, fig.canvas.get_renderer(), body_az, body_alt + 0.5, label, 0.5, 0.5,
+                        labelplace.text_beside(ax, label_renderer, body_az, body_alt + 0.5, label, 0.5, 0.5,
                                                color="#ffffff", fontproperties=label_font("bold", 10),
                                                path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
             except Exception:
@@ -1148,7 +1149,7 @@ if st.button("Generate Sky Graphic", type="primary"):
 
                 # Labeled once at least its upper half clears the horizon silhouette.
                 if show_labels and moon_alt > horizon_top_at(moon_az):
-                    labelplace.text_beside(ax, fig.canvas.get_renderer(), moon_az, moon_alt + 0.6, "Moon", r_x + 0.4, r_x + 0.4,
+                    labelplace.text_beside(ax, label_renderer, moon_az, moon_alt + 0.6, "Moon", r_x + 0.4, r_x + 0.4,
                                            color="#ffffff", fontproperties=label_font("bold", 11),
                                            path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
         except Exception:
@@ -1201,14 +1202,16 @@ if st.button("Generate Sky Graphic", type="primary"):
             if show_major_star_labels:
                 for az_val, alt_val, hip_id in zip(label_az, label_alt, label_hips):
                     if hip_id in MAJOR_STARS:
-                        ax.text(az_val + 0.4, alt_val + 0.4, MAJOR_STARS[hip_id], color="#ffffff", fontproperties=label_font("medium", 9), alpha=0.5,
-                                path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
+                        labelplace.text_beside(ax, label_renderer, az_val, alt_val + 0.4, MAJOR_STARS[hip_id], 0.4, 0.4,
+                                               color="#ffffff", fontproperties=label_font("medium", 9), alpha=0.5,
+                                               path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
             if show_minor_star_labels:
                 for az_val, alt_val, hip_id in zip(label_az, label_alt, label_hips):
                     if hip_id not in MAJOR_STARS:
-                        ax.text(az_val + 0.4, alt_val + 0.4, f"HIP {hip_id}", color="#ffffff", fontproperties=label_font("regular", 7), alpha=0.35,
-                                path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
+                        labelplace.text_beside(ax, label_renderer, az_val, alt_val + 0.4, f"HIP {hip_id}", 0.4, 0.4,
+                                               color="#ffffff", fontproperties=label_font("regular", 7), alpha=0.35,
+                                               path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
 
         # --- CONSTELLATION STICK FIGURES AND ASTERISMS ---
         # Reference overlays, independent of the star limit above. The stars
@@ -1312,9 +1315,9 @@ if st.button("Generate Sky Graphic", type="primary"):
                     if show_major_star_labels:
                         for hip_id, az_val, alt_val in zip(guide, g_az, g_alt):
                             if hip_id in MAJOR_STARS and alt_val > horizon_top_at(az_val):
-                                ax.text(az_val + 0.4, alt_val + 0.4, MAJOR_STARS[hip_id], color="#ffffff",
-                                        fontproperties=label_font("medium", 9), alpha=0.5 * guide_fade,
-                                        path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
+                                labelplace.text_beside(ax, label_renderer, az_val, alt_val + 0.4, MAJOR_STARS[hip_id], 0.4, 0.4,
+                                                       color="#ffffff", fontproperties=label_font("medium", 9),
+                                                       alpha=0.5 * guide_fade, path_effects=LABEL_OUTLINE, zorder=LABEL_ZORDER)
             except Exception:
                 logger.exception("Failed to draw constellation lines/asterisms")
 
