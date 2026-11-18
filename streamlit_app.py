@@ -2,7 +2,7 @@ import logging
 import time as time_module
 import streamlit as st
 import streamlit.components.v1 as components
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 import matplotlib
 matplotlib.use("Agg")  # Safe headless execution for cloud servers
@@ -417,8 +417,11 @@ st.sidebar.caption(f"📍 {st.session_state['lat_input']:.2f}, {st.session_state
 try:
     url_date = datetime.strptime(st.query_params.get("date", ""), "%Y-%m-%d").date()
 except ValueError:
-    url_date = datetime.now().date()
-obs_date = st.sidebar.date_input("Select Date", url_date)
+    # "Today" where the observer is: the server's own clock runs on UTC, which is
+    # already tomorrow for the Americas in the evening.
+    url_date = datetime.now(ZoneInfo(st.session_state["tz_select"])).date()
+_seed_session_state_once("obs_date", url_date)
+obs_date = st.sidebar.date_input("Select Date", key="obs_date")
 
 # Generate clean 12-hour time strings (AM/PM) with naive time object values
 time_options = []
@@ -439,12 +442,31 @@ try:
 except ValueError:
     default_time_index = time_labels.index("09:15 PM") if "09:15 PM" in time_labels else 0
 
+_seed_session_state_once("obs_time", time_options[default_time_index])
 obs_time = st.sidebar.selectbox(
     "Select Time",
     options=time_options,
     format_func=lambda x: x.strftime("%I:%M %p"),
-    index=default_time_index
+    key="obs_time",
 )
+
+
+def _step_time(minutes):
+    """Move the clock by `minutes`, rolling the date over midnight."""
+    moved = datetime.combine(st.session_state["obs_date"], st.session_state["obs_time"]) + timedelta(minutes=minutes)
+    st.session_state["obs_date"] = moved.date()
+    st.session_state["obs_time"] = moved.time()
+
+
+_step_cols = st.sidebar.columns(4)
+for _col, (_label, _minutes, _help) in zip(_step_cols, [
+    ("−1h", -60, "Back 1 hour"), ("−15", -15, "Back 15 minutes"),
+    ("+15", 15, "Forward 15 minutes"), ("+1h", 60, "Forward 1 hour"),
+]):
+    try:
+        _col.button(_label, key=f"step_{_minutes}", help=_help, on_click=_step_time, args=(_minutes,), width="stretch")
+    except Exception:  # older Streamlit without width="stretch"
+        _col.button(_label, key=f"step_{_minutes}", help=_help, on_click=_step_time, args=(_minutes,), use_container_width=True)
 
 selected_tz = st.sidebar.selectbox("Time Zone", TZ_OPTIONS, key="tz_select", format_func=TZ_LABELS.get)
 
