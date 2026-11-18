@@ -479,8 +479,9 @@ for _col, (_label, _minutes, _help) in zip(_step_cols, [
 ]):
     _full_width_button(_col, _label, key=f"step_{_minutes}", help=_help, on_click=_step_time, args=(_minutes,))
 
-# Filled in below, once the sky-condition sliders it depends on exist.
-_highlights_slot = st.sidebar.container()
+# Filled in below, once the sky-condition sliders it depends on exist. Sits in the main
+# window, just above the Generate button.
+_highlights_slot = st.container()
 
 selected_tz = st.sidebar.selectbox("Time Zone", TZ_OPTIONS, key="tz_select", format_func=TZ_LABELS.get)
 
@@ -700,9 +701,10 @@ with _highlights_slot:
             st.caption("No planet or Moon is clearly visible at least 10° up in the dark on this date.")
         else:
             st.caption("Planets and the Moon at least 10° up in a dark sky. Click one to jump to its best time and aim at it.")
-    for _h in _highlights:
+    _cols = st.columns(3)
+    for _i, _h in enumerate(_highlights):
         _name = f"{_h.name}, {_h.detail}" if _h.detail else _h.name
-        _full_width_button(st, f"{_name} · {_h.when:%I:%M %p}"+ f" · {_h.direction} · {_h.alt_deg:.0f}° up",
+        _full_width_button(_cols[_i % 3], f"{_name} · {_h.when:%I:%M %p} · {_h.direction} · {_h.alt_deg:.0f}° up",
                            key=f"hl_{_h.name}", on_click=_jump_to_highlight, args=(_h,))
     _note = st.session_state.get("_highlight_note")
     if _note and st.session_state.get(_note[1]) == _note[2]:
