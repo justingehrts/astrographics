@@ -334,8 +334,23 @@ _seed_session_state_once("place_query", _url_place)
 _seed_session_state_once("place_label", _url_place)
 _seed_session_state_once("place_coords", (round(float(url_lat), 2), round(float(url_lon), 2)))
 
-TZ_OPTIONS = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
-              "America/Phoenix", "America/Anchorage", "Pacific/Honolulu"]
+# Time zone names are what the app stores and shares; the labels are what the dropdown shows.
+# America/Regina stands in for every "UTC-6 all year" place (Saskatchewan, Mexico City...),
+# America/Cancun for "UTC-5 all year", and Phoenix also covers Sonora and Yukon.
+TZ_LABELS = {
+    "America/New_York": "Eastern (New York)",
+    "America/Chicago": "Central (Chicago)",
+    "America/Denver": "Mountain (Denver)",
+    "America/Los_Angeles": "Pacific (Los Angeles)",
+    "America/Phoenix": "Mountain, no daylight saving (Phoenix)",
+    "America/Anchorage": "Alaska (Anchorage)",
+    "Pacific/Honolulu": "Hawaii (Honolulu)",
+    "America/Halifax": "Atlantic (Halifax)",
+    "America/St_Johns": "Newfoundland (St. John's)",
+    "America/Regina": "Central, no daylight saving (Regina, Mexico City)",
+    "America/Cancun": "Eastern, no daylight saving (Cancun)",
+}
+TZ_OPTIONS = list(TZ_LABELS)
 _url_tz = st.query_params.get("tz", TZ_OPTIONS[0])
 _seed_session_state_once("tz_select", geocode.matching_zone(_url_tz, TZ_OPTIONS) or TZ_OPTIONS[0])
 
@@ -431,7 +446,7 @@ obs_time = st.sidebar.selectbox(
     index=default_time_index
 )
 
-selected_tz = st.sidebar.selectbox("Time Zone", TZ_OPTIONS, key="tz_select")
+selected_tz = st.sidebar.selectbox("Time Zone", TZ_OPTIONS, key="tz_select", format_func=TZ_LABELS.get)
 
 
 def describe_local_time(day, clock, tz_name):
