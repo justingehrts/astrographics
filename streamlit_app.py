@@ -599,7 +599,13 @@ FIG_WIDTH_IN, FIG_HEIGHT_IN = figure_size_in(image_format)
 fov_max = max_fov_for_lock(image_format) if st.session_state["lock_proportions"] else FOV_RANGE[1]
 if st.session_state["fov_width"] > fov_max:
     st.session_state["fov_width"] = fov_max
+# The slider's range is part of its identity, so when the range changes (lock ticked or
+# unticked) Streamlit treats it as a new slider and falls back to its minimum. Put the
+# previous width back before it is created.
+if st.session_state.get("_fov_max_last") not in (None, fov_max) and "_fov_last" in st.session_state:
+    st.session_state["fov_width"] = min(st.session_state["_fov_last"], fov_max)
 fov_width = st.sidebar.slider("Field of View Width (deg)", FOV_RANGE[0], fov_max, step=FOV_STEP, key="fov_width")
+st.session_state["_fov_last"], st.session_state["_fov_max_last"] = fov_width, fov_max
 lock_proportions = st.sidebar.checkbox(
     "Lock altitude to natural proportions", key="lock_proportions",
     help="Keeps the altitude shown matched to the width (at the chosen image shape) so a "
